@@ -305,6 +305,8 @@ class Agent(embodied.jax.Agent):
       pred = jnp.clip(pred * 255, 0, 255).astype(jnp.uint8)
       error = ((i32(pred) - i32(true) + 255) / 2).astype(np.uint8)
       video = jnp.concatenate([true, pred, error], 2)
+      if video.shape[-1] == 1:  # single-channel uint8 depth (legmm)
+        video = jnp.repeat(video, 3, axis=-1)
 
       video = jnp.pad(video, [[0, 0], [0, 0], [2, 2], [2, 2], [0, 0]])
       mask = jnp.zeros(video.shape, bool).at[:, :, 2:-2, 2:-2, :].set(True)
@@ -313,8 +315,9 @@ class Agent(embodied.jax.Agent):
       video = jnp.where(mask, video, border[None, :, None, None, :])
       video = jnp.concatenate([video, 0 * video[:, :10]], 1)
 
-      B, T, H, W, C = video.shape
-      grid = video.transpose((1, 2, 0, 3, 4)).reshape((T, H, B * W, C))
+      # Local names: rebinding T here broke the border of the next image key.
+      vB, vT, vH, vW, vC = video.shape
+      grid = video.transpose((1, 2, 0, 3, 4)).reshape((vT, vH, vB * vW, vC))
       metrics[f'openloop/{key}'] = grid
 
     # Video preds (float32 depth)

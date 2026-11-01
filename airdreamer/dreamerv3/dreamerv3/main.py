@@ -287,6 +287,7 @@ def make_env(config, index, **overrides):
       'loconav': 'embodied.envs.loconav:LocoNav',
       'drone': 'embodied.envs.drone_multi:OmniDronesMulti',
       'dronenav': 'embodied.envs.drone_navigation:OmniDronesNavigation',
+      'legmm': 'embodied.envs.legmm.env:LegMMEnv',
       'pinpad': 'embodied.envs.pinpad:PinPad',
       'langroom': 'embodied.envs.langroom:LangRoom',
       'procgen': 'embodied.envs.procgen:ProcGen',
@@ -301,6 +302,7 @@ def make_env(config, index, **overrides):
   env_key_alias = {
       'drone': 'drone_multi',
       'dronenav': 'drone_nav',
+      'legmm': 'legmm',
   }
   env_key = env_key_alias.get(suite, suite)
   kwargs = dict(config.env.get(env_key, {}))

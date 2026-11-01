@@ -1,0 +1,18 @@
+{
+  "split": "train",
+  "steps": 5000,
+  "seconds": 10.213,
+  "steps_per_s": 489.6,
+  "episodes": 18,
+  "nonfinite_steps": 0,
+  "term_reasons": {
+    "collision": 11,
+    "timeout": 7
+  },
+  "scene_types": {
+    "0": 3,
+    "1": 5,
+    "2": 4,
+    "3": 6
+  }
+}

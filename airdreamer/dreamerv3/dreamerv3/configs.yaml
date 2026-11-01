@@ -299,7 +299,7 @@ defaults:
       object: {size: [0.04, 0.08], mass: [0.05, 0.8]}   # AIRBOT Play rated payload 1.5 kg
       max_failed_grasps: 3
       camera_head:  {model: d435i, min_z: 0.28, max_z: 6.0, mount_xyz: [0.30, 0.0, 0.10], mount_pitch_deg: -15.0}  # TODO(calibrate)
-      camera_wrist: {model: d435i, min_z: 0.28, max_z: 2.0, mount_xyz: [-0.08, 0.0, 0.06], mount_pitch_deg: 30.0}  # set back so the object stays >= min_z at pre-grasp
+      camera_wrist: {model: d435i, min_z: 0.28, max_z: 2.0, mount_xyz: [-0.08, 0.0, 0.06], mount_pitch_deg: -30.0}  # gripper frame; set back so the object stays >= min_z at pre-grasp. Pitch sign as camera_head: negative = tilted down (legmm.yaml had +30). TODO(calibrate)
       obs_depth_dtype: uint8       # legmm.yaml: depth_dtype (renamed, see NOTE above)
       goal_provider: {type: gt_noisy, pos_sigma: 0.03, yaw_sigma: 0.1, latency_steps: [0, 2], dropout: 0.05}  # simulated RGB teacher
       arm: {mount_xyz: [0.10, 0.0, 0.12], reach: 0.647, min_reach: 0.15, payload: 1.5}   # AIRBOT Play; mount TODO(calibrate)
@@ -533,7 +533,7 @@ legmm: &legmm
   report_length: 32
   replay_context: 16
   replay: {size: 1e6, online: True}   # uint8 depth: ~7.7 KB x 2 streams per step
-  run: {envs: 32, eval_envs: 8, train_ratio: 32, steps: 3e6, log_every: 120, save_every: 900}
+  run: {envs: 32, eval_envs: 8, train_ratio: 32, steps: 3e6, log_every: 120, save_every: 900, debug: False}   # debug False -> parallel env processes (kin backend)
   jax: {platform: cuda, policy_devices: [0], train_devices: [0]}   # two GPUs: policy [1] / train [0]
   env.legmm: {backend: kin}
   agent:

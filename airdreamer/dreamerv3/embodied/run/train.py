@@ -34,6 +34,8 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
   term_reason_names = (
       'none', 'timeout', 'nan', 'collision', 'ground', 'out_of_bounds', 'terminal'
   )
+  if str(getattr(args, 'task', '')).startswith('legmm_'):
+    from embodied.envs.legmm.interfaces import TERM_REASONS as term_reason_names
   policy_fps = elements.FPS()
   train_fps = elements.FPS()
 
