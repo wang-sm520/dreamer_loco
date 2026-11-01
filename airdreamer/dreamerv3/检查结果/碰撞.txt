@@ -1,0 +1,78 @@
+碰撞检测链路完整分析
+1. 接触力获取路径
+debug 输出显示 _get_contact_views() 返回两个 RigidPrimView 对象：
+View	Prim Path	覆盖范围
+self._drone.base_link	{drone_path}/base_link	无人机机体
+self._rotor_contact_view	{drone_path}/rotor_*	所有旋翼
+两个 View 创建时均传入了 track_contact_forces=True：
+drone_omnidrones.py
+Lines 979-979
+    self._drone.initialize(prim_paths_expr=self._drone_prim_path, track_contact_forces=True)
+drone_omnidrones.py
+Lines 990-997
+        rotor_view = RigidPrimView(            prim_paths_expr=f"{self._drone_prim_path}/rotor_*",            name=f"rotors_contact_{int(self._env_id)}",            track_contact_forces=True,            shape=(1, 1, num_rotors),        )        rotor_view.initialize()        self._rotor_contact_view = rotor_view
+OmniDrones 的 RigidPrimView.get_net_contact_forces 直接代理到 Isaac Sim 底层的 PhysX，不做任何碰撞对过滤（contact_filter_prim_paths_expr 默认为空元组）：
+__init__.py
+Lines 499-508
+    def get_net_contact_forces(        self,        env_indices: Optional[torch.Tensor] = None,        clone: bool = False,        dt: float = 1,    ) -> torch.Tensor:        indices = self._resolve_env_indices(env_indices)        return (            super().get_net_contact_forces(indices, clone, dt).unflatten(0, self.shape)        )
+结论：get_net_contact_forces 返回的是该 rigid body 与场景中所有物体碰撞产生的合力。 不区分碰撞对象是地面、障碍物还是其他无人机。
+2. 碰撞判定时序
+step(action)  ├─ _omni_pre_step:  apply_action(act)  ├─ arena.step():    PhysX 物理步进 → 更新接触力 buffer  └─ _omni_post_step: _compute_obs(effort)                        └─ _has_collision(threshold=1e-4)                            └─ 读取 base_link + rotors 的 net contact forces
+时序正确：力在物理步进后被读取，不存在读旧数据的问题。
+3. 判定逻辑
+drone_omnidrones.py
+Lines 1261-1279
+    collision = False    if not grace:      collision = self._has_collision(self._collision_force_threshold)      if collision:        reward -= float(self._collision_penalty)    tilt_term = False    if not grace and up_z < self._tilt_hard_cos:      self._tilt_violation_count += 1      reward -= 2.0      if self._tilt_violation_count >= self._tilt_hard_grace:        tilt_term = True    else:      self._tilt_violation_count = max(0, self._tilt_violation_count - 1)    if self._update_target_on_success(drone_state):      reward += 100.0    terminal = bool((out_of_bounds | hasnan).item() or collision or tilt_term)
+grace 期间：collision = False，不检测（防止地面起飞时误判）
+grace 之后：阈值 1e-4 极敏感，任何实际物理接触都会触发
+terminal 综合了 out_of_bounds、hasnan、collision、tilt_term
+4. 逐场景判断
+(a) 碰撞障碍物
+障碍物是 TerrainImporter 生成的 heightfield mesh 的一部分（/World/ground）。地形配置：
+drone_omnidrones.py
+Lines 486-497
+                "obstacles": HfDiscreteObstaclesTerrainCfg(                    size=terrain_size,                    horizontal_scale=float(tc.get('horizontal_scale', 0.1)),                    vertical_scale=float(tc.get('obstacle_vertical_scale', 0.1)),                    border_width=0.0,                    num_obstacles=int(tc.get('num_obstacles', 50)),                    obstacle_height_mode="choice",                    obstacle_width_range=tuple(tc.get('obstacle_width_range', [0.4, 0.8])),                    obstacle_height_range=tuple(tc.get('obstacle_height_range', [3.0, 4.0])),                    platform_width=float(tc.get('platform_width', 1.5)),                )
+地形 collision_group=-1（默认组，与一切碰撞）。当无人机物理接触到 heightfield mesh 的凸起部分时，PhysX 产生接触力 → get_net_contact_forces 返回非零值 → _has_collision 检测到 → terminal=True → reset。
+这条链路逻辑正确。但有一个隐患： obstacle_height_range=[3.0, 4.0] 配合 vertical_scale=0.1，实际障碍物高度为 0.3m ~ 0.4m。无人机正常飞行高度 1~2m，直接从障碍物上方飞过，根本不会发生物理碰撞。除非无人机因姿态失控坠向地面附近，否则这些障碍物不会触发 collision reset。
+如果需要障碍物真正阻挡无人机飞行，需要大幅增加高度，例如将 obstacle_height_range 改为 [20.0, 40.0]（实际高度 2~4m）或将 obstacle_vertical_scale 增大。
+(b) 无人机间碰撞
+每架无人机的 base_link 和 rotor_* 都启用了 track_contact_forces=True，且通过 _enable_nested_collisions 递归开启了全部子 prim 的碰撞属性。当无人机 A 与无人机 B 物理接触时：
+A 的 base_link.get_net_contact_forces() 包含来自 B 的力 → A 检测到碰撞 → A 终止
+B 的 base_link.get_net_contact_forces() 包含来自 A 的力 → B 检测到碰撞 → B 终止
+两机互撞时双方同时检测到，逻辑正确。
+(c) 撞地
+撞地有双重检测：
+位置判定（无需接触力）：ground_hit = (z < 0.2) | (z < 0.4 & vz < -0.5) → 计入 out_of_bounds → terminal
+接触力判定：地面也是 /World/ground mesh 的一部分，触地产生的接触力同样被 _has_collision 捕获
+二者取 OR，不会漏判。
+5. 总结
+场景	检测能力	是否存在问题
+撞地	位置判定 + 接触力双保险	正确
+撞障碍物	接触力检测链路完整	障碍物太矮（0.3~0.4m），无人机大概率飞不到，实际碰不上
+无人机互撞	双方独立检测接触力	正确
+grace 期间	碰撞检测关闭	正确（设计意图）
+reset 后首帧	_clear_contact_forces 清零残留力	正确
+
+改动总结：
+
+### 上次修复为什么没生效
+
+之前的 `if name.startswith('rotor'): continue` 只是**不主动开启**旋桨碰撞，但 hummingbird USD 模型本身在 spawn 时就已经带有碰撞属性。`continue` 跳过了 `Set(True)` 调用，但碰撞**本来就是开着的**，等于什么都没做。
+
+### 这次的三层修复
+
+**1. `_setup_drone_collisions` — 只保留 `base_link` 碰撞，其余一律禁用**
+
+遍历无人机所有子 prim，对每个 prim：
+- 如果是 `base_link` → `collisionEnabled = True`（同时也对 base_link 的子 mesh 启用）
+- 其余所有 prim（rotor_0/1/2/3、支架等）→ `collisionEnabled = False`
+
+这样旋桨和支架即使碰到地面，PhysX 也完全忽略，不会产生任何接触力。只有 `base_link` 的中心机体参与碰撞检测。
+
+**2. `max_depenetration_velocity` 从 1.0 降到 0.1**
+
+之前 1.0 m/s 的穿透修正速度仍然可以把 0.716kg 的无人机弹起几厘米。降到 0.1 m/s 后，即使发生轻微穿透，PhysX 也只会以极慢速度把刚体推出，不会出现弹射现象。
+
+**3. 新增 `max_contact_impulse=0.5`**
+
+限制任何单次接触能施加的最大冲量为 0.5 N·s。对一个 0.716kg 的无人机来说，这意味着单次碰撞最多产生 ~0.7 m/s 的速度变化，远不足以弹飞。

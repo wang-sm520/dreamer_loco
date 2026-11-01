@@ -1,0 +1,69 @@
+toolName: search_codebase
+            
+status: success
+          
+query: OmniDrones IsaacEnv step 同步更新 多环境 多无人机 逻辑 实现位置
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/air_dreamer/OmniDrones/omni_drones/envs/isaac_env.py
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: Hover env 多无人机 num_envs 或 num_drones 共享 step 逻辑 以及 drone view 的 batch 维度使用
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: Hover env 多无人机动作/观测 张量维度 (num_envs, num_drones) 使用位置
+          
+**核心机制**
+- 单一仿真上下文统一推进：OmniDrones 的环境基类使用一个 SimulationContext，在每次 env.step 内只调用一次物理步进，所有已克隆的子环境（和其中的多个无人机）都在这个统一时间步里同步更新。[isaac_env.py:_step](file:///home/bdi/yck/air_dreamer/OmniDrones/omni_drones/envs/isaac_env.py#L264-L273)
+- GridCloner批量克隆场景：先构建一个模板场景，再用 GridCloner把它克隆为 N 个子环境，每个子环境在 USD Stage 中占一个命名空间并具有唯一的位置偏移。这样所有子环境共享同一个物理世界，但互不碰撞。[isaac_env.py:cloner](file:///home/bdi/yck/air_dreamer/OmniDrones/omni_drones/envs/isaac_env.py#L132-L152)
+
+**步进与同步**
+- 批量应用动作：
+  - 在具体任务（如 Hover）里，预步进阶段将整批动作一次性下发给对应的无人机视图，内部张量形状通常是 [num_envs, 1, num_rotors] 或 [num_envs, num_rotors]，因此所有无人机的控制输入在同一帧被写入。[hover.py:_pre_sim_step](file:///home/bdi/yck/air_dreamer/OmniDrones/omni_drones/envs/single/hover.py#L280-L283)
+  - 底层机器人类 MultirotorBase 将这些动作映射到推力/力矩并更新关节速度，同样是批量操作；其内部状态（位置、速度、旋转、油门等）均以批维度展开，面向所有子环境统一更新。[multirotor.py:apply_action](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L244-L285)
+- 统一推进仿真：
+  - IsaacEnv 在 _step 中循环 substeps 次，先批量调用 _pre_sim_step（下发动作）后执行 self.sim.step(...) 一次推进物理世界；这一步对所有克隆子环境生效，实现“一次步进、全体更新”。[isaac_env.py:_step](file:///home/bdi/yck/air_dreamer/OmniDrones/omni_drones/envs/isaac_env.py#L264-L273)
+- 批量采样观测与奖励：
+  - 物理推进后，Hover 在 _compute_state_and_obs、_compute_reward_and_done 中一次性读取所有子环境的状态，计算相对位置、航向差、奖励分解与 done 标志，返回一个包含批维的 TensorDict，第一维等于 num_envs。[hover.py:_compute_state_and_obs](file:///home/bdi/yck/air_dreamer/OmniDrones/omni_drones/envs/single/hover.py#L285-L306)、[hover.py:_compute_reward_and_done](file:///home/bdi/yck/air_dreamer/OmniDrones/omni_drones/envs/single/hover.py#L308-L359)
+
+**多无人机与批维度**
+- 单无人机任务（Hover）：每个子环境里一个无人机，动作与观测的批维就是 num_envs；形如 obs shape (num_envs, 1, obs_dim)，action shape (num_envs, 1, num_rotors)。统一下发动作、统一步进、统一读取返回。
+- 多无人机任务（PlatformHover/Transport 等）：场景中为每个子环境创建多个无人机视图，机器人视图和动作/状态张量在最后一维增加 num_drones，并在任务层面将动作/观测字典组织为多代理结构；但推进仍是同一个 self.sim.step，确保所有无人机按同一时间轴同步更新。[platform_hover.py 描述与 AgentSpec 组织，参考同类结构；机制与 Hover 相同，批维扩展为 (num_envs, num_drones)]
+
+**环境克隆与坐标处理**
+- 环境位移管理：克隆时记录每个子环境的位移 envs_positions；机器人 get_state 会将 world pose 转为 env frame（减去各自 env 位置偏移），因此同一个 step 返回的状态已按子环境坐标系对齐，批量计算更简洁。[isaac_env.py:get_env_poses](file:///home/bdi/yck/air_dreamer/OmniDrones/omni_drones/envs/isaac_env.py#L340-L346)、[multirotor.py:get_state](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L286-L306)
+
+**交互顺序（一次 env.step 的流水）**
+- 组装批量动作张量（num_envs × ...）。
+- _pre_sim_step：批量 apply_action 下发到各无人机。
+- sim.step：推进一次物理世界。
+- _compute_state_and_obs：批量读出所有无人机的观测。
+- _compute_reward_and_done：批量计算奖励与终止标志。
+- 返回 TensorDict，第一维为 num_envs，实现“同一个 env.step 同步更新全部子环境（含多个无人机）”。
+
+这套设计的关键是：
+- 单一 SimulationContext。
+- GridCloner 的场景复制与碰撞过滤。
+- 机器人与视图的张量化批维实现。
+- 任务层统一的批量动作/观测/奖励管线。
+
+如果你需要我针对 PlatformHover 这种多无人机场景给出具体的张量维度示例（例如 action 的形状、观测拼接方式、奖励聚合策略），我可以再补一段简化示例来说明 num_envs × num_drones 的批量结构是如何在一次 sim.step 中被统一处理的。

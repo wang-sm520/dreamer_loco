@@ -1,0 +1,89 @@
+1) 根字段
+step：全局环境步数（x 轴基准），几乎所有日志都带它。
+2) episode/*（每个 episode 结束时）
+episode/score：该回合累计奖励（return）。
+episode/length：该回合步长。
+episode/worker：采样 worker 编号（你现在基本是 0）。
+你最直观看训练好坏的就是 episode/score 的趋势和波动。
+3) epstats/*（多个 episode 的聚合统计）
+epstats/reward_rate：奖励变化率，代码里定义为
+mean(abs(rew[t]-rew[t-1]) >= 0.01)
+即“相邻步奖励有明显变化的比例”。
+高：奖励信号变化频繁（可能有进展，也可能抖动大）
+低：奖励序列平稳（可能稳定，也可能停滞）
+4) fps/*（吞吐性能）
+fps/policy：环境交互/策略推理速度（步/秒）。
+fps/train：训练更新速度（优化步相关吞吐）。
+用于判断瓶颈是在采样还是训练。
+5) replay/*（经验回放缓冲区状态）
+这些来自 replay 的 stats()：
+replay/items：当前可采样序列条目数。
+replay/chunks：底层 chunk 数量。
+replay/streams：活跃数据流数量（通常≈worker数）。
+replay/ram_gb：回放占用内存（GB）。
+replay/inserts：统计窗口内插入条目数。
+replay/samples：统计窗口内采样次数。
+replay/updates：统计窗口内对回放条目做 update（如优先级/上下文写回）的数量。
+replay/replay_ratio：length * samples / inserts，可理解为“每条数据平均被训练复用的程度”。
+replay_ratio 太低可能样本利用不够，太高可能过拟合旧数据。
+6) train/loss/*（训练损失）
+这些是总损失各分项（通常会乘 loss_scales 汇总成 train/opt/loss）：
+train/loss/dyn：动力学模型损失（世界模型时序预测相关）。
+train/loss/rep：表征模型损失（你这版里常与 dyn 接近/相同来源）。
+train/loss/rew：奖励预测头损失（预测环境 reward）。
+train/loss/con：continuation/discount 头损失（预测是否继续）。
+train/loss/state：状态重建损失（decoder 对 state 观测的重建误差）。
+train/loss/lidar：激光观测重建损失（decoder 对 lidar 的重建误差）。
+train/loss/policy：策略损失（想象轨迹上的 actor objective）。
+train/loss/value：价值函数损失。
+train/loss/repval：replay value loss（从回放真实轨迹训练 value 的分支损失）。
+你这里 loss/lidar 数值通常较大是常见现象（维度高、重建难）。
+7) train/（非 loss 的学习信号）
+这些大多来自 imagined return / advantage 统计：
+train/rew：想象轨迹中的平均预测奖励。
+train/con：平均 continuation 概率。
+train/ret：归一化后的平均 return。
+train/ret_min, train/ret_max：归一化 return 范围。
+train/ret_rate：mean(abs(ret_normed) >= 1.0)，表示“显著回报信号占比”。
+train/val：value 预测均值。
+train/slowval：slow target value 预测均值。
+train/tar：归一化 target return 均值。
+train/weight：lambda-return 权重项均值（想象时序加权）。
+train/adv：advantage 均值。
+train/adv_std：advantage 标准差。
+train/adv_mag：mean(abs(adv))。
+train/dyn_ent：动力学潜变量熵（不确定性/多样性）。
+train/rep_ent：表征潜变量熵。
+train/ent/action：动作分布熵（探索强度）。
+8) train/opt/*（优化器与梯度健康度）
+这些来自 embodied/jax/opt.py：
+train/opt/loss：优化器看到的总目标（已加权聚合）。
+train/opt/updates：累计优化更新步数。
+train/opt/grad_norm：全局梯度范数。
+train/opt/grad_rms：梯度 RMS。
+train/opt/update_rms：参数更新量 RMS。
+train/opt/param_rms：参数值 RMS。
+train/opt/param_count：参数总数。
+用于判断是否梯度爆炸/更新过小等。
+9) usage/*（系统资源监控，不是算法指标）
+GPU (nvsmi)
+每张卡都有以下三种统计（gpu0..gpu3）：
+usage/nvsmi/compute_{min,avg,max}/gpuX：GPU 计算利用率。
+usage/nvsmi/memory_{min,avg,max}/gpuX：GPU 显存利用率。
+CPU/内存 (psutil)
+usage/psutil/proc_cpu_usage：当前训练进程 CPU 占用。
+usage/psutil/proc_ram_gb：当前进程 RAM（GB）。
+usage/psutil/proc_ram_frac：当前进程 RAM 占系统比例。
+usage/psutil/total_cpu_count：CPU 核心数。
+usage/psutil/total_cpu_frac：整机 CPU 总占用。
+usage/psutil/total_ram_total_gb：总内存。
+usage/psutil/total_ram_used_gb：已用内存。
+usage/psutil/total_ram_avail_gb：可用内存。
+usage/psutil/total_ram_frac：系统内存占用比例。
+怎么用这些指标快速判断训练状态
+任务是否在学：看 episode/score、train/ret、train/val 是否长期上升或更稳定。
+是否过于“投机”：episode/score 上升但 episode/length 异常缩短/策略单一，可结合视频验证。
+世界模型是否跟上：train/loss/state、train/loss/lidar、train/loss/rew 是否下降或稳定。
+优化是否健康：train/opt/grad_norm 不应长期极端尖峰；update_rms 不应接近 0 太久。
+数据利用是否合理：replay/replay_ratio 过高或过低都要警惕。
+算力瓶颈：fps/policy vs fps/train + usage/* 一起看。

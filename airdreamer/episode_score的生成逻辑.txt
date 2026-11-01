@@ -1,0 +1,18 @@
+
+          
+**结论与含义**
+- `episode/score` 是每个 episode 内所有 step 奖励的累加和（return），在 episode 结束时一次性记录。
+- 该值直接反映环境奖励的累计结果，若环境对 reward 做了缩放或 shaping，`episode/score` 也会随之体现。
+
+**产生流程（关键代码）**
+- 在训练循环的 `logfn` 中，每个 step 都把 `tran['reward']` 以 `sum` 方式累积到 `score`，并在 `tran['is_last']` 时取出结果写日志：[train.py:L30-L56](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/run/train.py#L30-L56)
+  - `episode.add('score', tran['reward'], agg='sum')` 累加奖励
+  - `logger.add({'score': ...}, prefix='episode')` 在 episode 结束时写出
+- 因为用了 `prefix='episode'`，最终日志键名变成 `episode/score`。
+
+**落盘位置**
+- `make_logger` 把 `episode/score` 单独写到 `scores.jsonl`：[main.py:L184-L195](file:///home/bdi/yck/air_dreamer/dreamerv3/dreamerv3/main.py#L184-L195)
+
+**简要理解**
+- `episode/score = Σ_t reward_t`（一个 episode 的总奖励）。
+- 这是 DreamerV3 最常用的“回合回报”指标，用来衡量策略在单回合中的整体表现。

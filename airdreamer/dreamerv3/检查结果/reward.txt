@@ -1,0 +1,73 @@
+一、参数一览
+参数	默认值	当前值	含义
+reward_distance_scale	1.2	1.2	距离奖励的衰减尺度
+reward_effort_weight	0.1	0.1	力矩效率奖励权重
+reward_action_smoothness_weight	0.05	0.05	动作平滑奖励权重
+reward_progress_weight	100.0	100.0	接近目标的进度奖励权重
+stagnation_window	60	60	停滞检测窗口（步）
+stagnation_progress_threshold	0.5	0.5	窗口内进度和阈值
+stagnation_penalty	1.0	1.0	停滞惩罚值
+collision_penalty	20.0	20.0	碰撞惩罚值
+tilt_penalty_weight	—	0.0	倾斜软惩罚（当前关闭）
+angvel_penalty_weight	—	0.0	角速度惩罚（当前关闭）
+二、Reward 逐项解析
+(A) 基础奖励项
+drone_omnidrones.py
+Lines 1258-1263
+    pos_dist = torch.norm(rpos, dim=-1)    reward_pose = 1.0 / (1.0 + torch.square(self._reward_distance_scale * pos_dist))    reward_up = torch.square((self._drone.up[..., 2] + 1) * 0.5)    reward_spin = 1.0 / (1.0 + torch.square(self._drone.vel[..., -1])**2)    reward_effort = self._reward_effort_weight * torch.exp(-effort)    reward_smooth = self._reward_action_smoothness_weight * torch.exp(-self._drone.throttle_difference)
+项	公式	范围	含义
+reward_pose	1/(1 + (1.2·d)²)	[0, 1]	离目标越近越大；距目标 1m 时 ≈ 0.41，5m 时 ≈ 0.027
+reward_up	((up_z+1)/2)²	[0, 1]	机体朝上 z 分量，完全正直时 =1，倒扣时 =0
+reward_spin	1/(1 + ω_yaw⁴)	[0, 1]	偏航角速度越小越大，衰减非常激进
+reward_effort	0.1·exp(-effort)	[0, 0.1]	鼓励低能耗
+reward_smooth	0.05·exp(-Δthrottle)	[0, 0.05]	鼓励平滑操控
+(B) 进度奖励
+drone_omnidrones.py
+Lines 1275-1283
+    progress = 0.0    if self._prev_dist is not None:      progress = (self._prev_dist - pos_dist).reshape(())    self._prev_dist = pos_dist.detach().reshape(1, 1)    ...    + self._reward_progress_weight * progress
+100.0 × (prev_dist − current_dist)：每步靠近目标 0.05m 就得 +5.0。这是当前 reward 的绝对主力。
+(C) 组合公式
+drone_omnidrones.py
+Lines 1280-1285
+    reward = (        reward_pose * (1.0 + reward_up + reward_spin)        + reward_effort + reward_smooth        + self._reward_progress_weight * progress        - tilt_penalty - angvel_penalty    )
+展开后每步典型值域：
+成分	典型贡献
+reward_pose × (1 + up + spin)	0.03 ~ 3.0（仅在很近时才大）
+reward_effort + reward_smooth	0.0 ~ 0.15
+100 × progress	-10 ~ +10（主导项）
+tilt_penalty	0.0（权重为 0，关闭）
+angvel_penalty	0.0（权重为 0，关闭）
+(D) 条件性惩罚/奖励
+drone_omnidrones.py
+Lines 1288-1321
+    # 停滞惩罚    if sum(progress_history) < 0.5 over 60 steps:      reward -= 1.0    # 碰撞惩罚    if collision:      reward -= 20.0    # 姿态硬违规（每步）    if up_z < tilt_hard_cos:      reward -= 2.0    # 到达目标    if success:      reward += 100.0
+事件	值	频率
+停滞	-1.0	连续 60 步无进展时每步触发
+碰撞	-20.0	一次性，随后 terminal
+姿态硬违规	-2.0	每步累加
+到达目标	+100.0	每次到达一次
+三、当前 Reward 的问题分析
+问题 1：进度奖励完全主导，其他信号被淹没
+progress_weight=100.0 让每步进度值在 -10 ~ +10 量级，而 reward_pose、reward_up、reward_spin、effort、smooth 加起来最多 ~3.15。Agent 只需要学"直线冲向目标"，完全忽略姿态稳定和能量效率——因为这些信号在 progress 面前等于噪声。
+问题 2：姿态控制奖惩全部关闭
+tilt_penalty_weight=0.0、angvel_penalty_weight=0.0 意味着从 35° 到 55° 的软区间完全无惩罚。Agent 唯一感知到的姿态信号是 reward_up（被 progress 淹没）和 tilt_hard 触发的 -2.0/step（此时已经快坠机了）。
+问题 3：停滞惩罚太弱
+-1.0 vs 每步 progress 贡献的 ±5~10，停滞惩罚不足以改变策略。Agent 在远离目标时本就有正 progress 驱动，真正停滞时 -1.0 不痛不痒。
+问题 4：碰撞惩罚是一次性的
+-20.0 只发生在碰撞那一帧然后 episode 直接结束。对 DreamerV3 来说这相当于一个离散事件，模型需要大量碰撞样本才能学到"避障"。没有渐进式的"靠近障碍物越来越危险"的信号。
+问题 5：到达目标奖励相对不突出
++100.0 看似很大，但如果 Agent 用 200 步飞到目标（累积 progress ≈ 100 × dist），progress 的总贡献和 +100 在同一量级。Agent 可能学到"慢慢接近"和"快速到达"奖励差不多。
+四、修改建议
+建议 1：降低 progress_weight，回归"塑形辅助"角色
+将 reward_progress_weight 从 100.0 降到 5.0~10.0。progress 应该是塑形信号帮助 Agent 在早期学到"靠近目标好"，而不是成为 Agent 的终极优化目标。
+建议 2：开启姿态软惩罚
+将 tilt_penalty_weight 设为 0.3~0.5，angvel_penalty_weight 设为 0.1。这样在 35°~55° 区间有渐进惩罚，Agent 可以平滑地学到"保持稳定"，而不是到 55° 才突然受罚。
+建议 3：增加基于 LiDAR 的障碍物接近惩罚
+利用已有的 LiDAR 数据，计算最近障碍物距离，给一个渐进惩罚：
+lidar_min = best_dists.min()if lidar_min < proximity_threshold:  # e.g. 1.0m    proximity_penalty = proximity_weight * (1.0 - lidar_min / proximity_threshold)    reward -= proximity_penalty
+这比纯碰撞惩罚有效得多：Agent 在接近障碍物时就能感知到危险，而不是只在撞上时才知道。
+建议 4：增加存活奖励（survival bonus）
+每步给一个小的正奖励（如 +0.5），鼓励"活得久"。这对抗 progress 带来的"莽撞冲刺"倾向：
+reward += 0.5  # alive bonus
+建议 5：提高目标到达奖励相对比重
+如果降低了 progress_weight，+100.0 的目标奖励自然会变得更突出。也可以考虑在连续到达多个目标时给递增奖励（如第 N 个目标给 100 + 20*N），激励 Agent 持续探索。

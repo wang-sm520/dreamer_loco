@@ -1,0 +1,47 @@
+1. RayCaster 射线朝向构建（静态障碍物）
+1.1 配置
+drone_omnidrones.py
+Lines 1078-1085
+    ray_caster_cfg = RayCasterCfg(        prim_path=f'{self._drone_prim_path}/base_link',        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0)),        attach_yaw_only=False,        pattern_cfg=pattern_cfg,        debug_vis=False,        mesh_prim_paths=[ground_path],    )
+关键：attach_yaw_only=False。
+1.2 RayCaster 内部射线旋转逻辑
+attach_yaw_only=False 在 _update_buffers_impl 中被转换为 ray_alignment="base"：
+ray_caster.py
+Lines 261-266
+            if self.cfg.attach_yaw_only:                self.cfg.ray_alignment = "yaw"                ...            else:                self.cfg.ray_alignment = "base"
+ray_alignment="base" 时的执行路径：
+ray_caster.py
+Lines 284-290
+        elif self.cfg.ray_alignment == "base":            pos_w[:, 0:2] += quat_apply(quat_w, self.ray_cast_drift[env_ids])[:, 0:2]            # full orientation is considered            ray_starts_w = quat_apply(quat_w.repeat(1, self.num_rays), self.ray_starts[env_ids])            ray_starts_w += pos_w.unsqueeze(1)            ray_directions_w = quat_apply(quat_w.repeat(1, self.num_rays), self.ray_directions[env_ids])
+ray_directions_w 通过 quat_apply(quat_w, ...) 使用了机体的完整四元数（roll + pitch + yaw）旋转射线方向。 射线方向随机体的每一次姿态变化而变化。
+最终 raycast：
+ray_caster.py
+Lines 296-301
+        self._data.ray_hits_w[env_ids] = raycast_mesh(            ray_starts_w,            ray_directions_w,            max_dist=self.cfg.max_distance,            mesh=self.meshes[self.cfg.mesh_prim_paths[0]],        )[0]
+输出 data.ray_hits_w 是世界坐标系下的射线击中点，隐含了机体的完整姿态旋转。
+2. 动态障碍物射线方向推导
+drone_omnidrones.py
+Lines 1164-1173
+      ray_origins_w = data.pos_w[0].unsqueeze(0).expand(target_size, 3)      ray_hits_w = data.ray_hits_w[0]      ray_dirs_w = ray_hits_w - ray_origins_w      dir_norms = ray_dirs_w.norm(dim=-1, keepdim=True).clamp(min=1e-6)      ray_dirs_unit = ray_dirs_w / dir_norms      other_pos = torch.cat(other_positions, dim=0).reshape(-1, 3)      drone_dists = self._ray_sphere_batch(          ray_origins_w, ray_dirs_unit,          other_pos, self._drone_hit_radius, lidar_range)
+核心等式推导：
+RayCaster 内部:  hit_point = pos_w + t × ray_direction_w        (ray_direction_w 已被 quat_apply 旋转)_lidar_obs 中:  ray_dirs_w = ray_hits_w - pos_w = t × ray_direction_w  ray_dirs_unit = ray_dirs_w / ‖ray_dirs_w‖ = ray_direction_w / ‖ray_direction_w‖
+由于 BpearlPatternCfg 生成的 ray_directions 本身就是单位向量，经 quat_apply 旋转后仍是单位向量，所以：
+ray_dirs_unit = ray_direction_w    (完全一致)
+动态障碍物的射线方向与 RayCaster 的射线方向是同一组向量，二者同步随机体旋转。不存在不一致的问题。
+3. 距离融合的一致性
+静态:  terrain_dists[i] = ‖ray_hits_w[i] - pos_w‖  (沿射线 i 的地形命中距离)动态:  drone_dists[i] = _ray_sphere_batch(pos_w, ray_dirs_unit[i], ...)  (沿射线 i 的球体命中距离)融合:  best_dists = min(terrain_dists, drone_dists)
+两者：
+原点相同：都从 data.pos_w 出发
+方向相同：都是经机体四元数旋转后的世界坐标方向
+距离单位相同：都是沿射线的欧氏距离（米）
+截断值相同：都 clamp 到 lidar_range
+torch.min 取逐射线最近命中，语义正确。
+4. 结论
+当前实现是正确的。 动态障碍物和静态障碍物使用的射线束方向完全一致，都会随机体姿态（roll/pitch/yaw）同步旋转。原因在于动态检测的射线方向不是独立生成的，而是直接从 ray_hits_w - pos_w 反推出来的——这本身就是 RayCaster 旋转后的射线方向。
+当前动态 LiDAR里，无人机不是按“点”，也不是按“长方体”处理，而是按球体近似处理的。
+每个其他无人机用一个球表示：
+球心：该无人机当前世界坐标（get_world_poses 拿到的位置）
+半径：self._drone_hit_radius（当前是 0.3）
+计算方法：对每条 ray 做 ray-sphere intersection（_ray_sphere_batch(...)），取命中距离并与静态地形 raycast 结果取最小值融合。
+所以结论是：动态障碍物是“有体积”的球模型，不是点模型。
+如果你想更贴近机体形状，可以改成 AABB/OBB（长方体）或直接多 mesh 几何求交。

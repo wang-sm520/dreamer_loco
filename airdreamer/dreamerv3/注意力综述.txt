@@ -1,0 +1,274 @@
+## 结论
+
+有，而且已经是一个相当成熟的研究方向。你提到的“让网络专注于一个范围”大致可分成两大类：
+
+1. **外部主动聚焦**  
+   不是让网络在固定输入上“看哪里”，而是**主动改变观察方式**，例如转动相机/传感器、选择下一个视角、逐步放大某个局部。这条线通常叫 **active vision / next-best-view / glimpse**。
+
+2. **内部选择性聚焦**  
+   输入不变，但网络内部只对某个局部窗口、若干关键点、某段文本、某些雷达 bin/point 进行更强建模。这条线通常叫 **local attention / window attention / deformable attention / ROI attention / rationale selection**。
+
+如果用一句话概括这个领域：  
+**“限制网络的注意范围”并不是为了单纯少看，而是为了在有限算力下更精准地看、并减少无关背景噪声。**
+
+---
+
+## 一个统一的技术框架
+
+| 路线 | 典型做法 | 适用模态 | 优点 | 典型问题 |
+|---|---|---|---|---|
+| 主动视角选择 | 转动相机/机械臂/传感器，选择 next-best-view | 机器人视觉、3D识别、重建 | 直接获取更有信息的观测 | 需要控制环、采样成本高 |
+| Glimpse / Hard Attention | 每次只裁一小块高分辨率区域 | 图像、视频 | 抗 clutter，计算省 | 常需 RL 或离散选择训练 |
+| Spatial Transformer / 可学习裁剪 | 学仿射变换、旋转、缩放、局部对齐 | 图像、OCR、检测 | 可微、端到端 | 变换能力有限 |
+| Deformable Sampling / Attention | 只关注若干学习到的采样点 | 图像、检测、点云、雷达 | 对小目标/稀疏目标很有效 | 实现更复杂 |
+| Window / Local Attention | 只在局部窗口内做注意力 | 图像、文本、视频 | 复杂度低，适合长输入 | 全局依赖容易丢 |
+| Local + Global 混合 | 局部窗口 + 少量全局 token/query | 文本、视觉 | 兼顾效率和全局信息 | 超参较多 |
+| Span / Rationale Selection | 先挑一段文本再预测 | NLP | 可解释、适合长文档 | 被挑出的 span 不一定最优 |
+| 雷达 ROI / 柱状注意力 | 对 range-azimuth-doppler 或 radar pillars 局部聚焦 | 雷达、自动驾驶 | 适合稀疏噪声场景 | 数据集和统一基线还较少 |
+
+---
+
+## 图像领域：最成熟，路线最完整
+
+### 1. 主动“看哪里”：glimpse 与 active vision
+这是最接近你说的“转动视角/看图像某一块”的路线。
+
+- **Recurrent Models of Visual Attention**  
+  经典的 hard attention / glimpse 模型。网络像“眼睛扫视”一样，每步只看一个局部区域，再决定下一步看哪里。  
+  论文：[NeurIPS 2014 PDF](https://proceedings.neurips.cc/paper_files/paper/2014/file/09c6c3783b4a70054da74f2538ed47c6-Paper.pdf)
+
+- **Look Closer to See Better (RA-CNN)**  
+  用于细粒度识别，逐层“放大”更有判别力的局部区域。  
+  论文：[CVPR 2017 PDF](https://openaccess.thecvf.com/content_cvpr_2017/papers/Fu_Look_Closer_to_CVPR_2017_paper.pdf)
+
+- **FoveaTer: Foveated Transformer for Image Classification**  
+  模仿人眼中心凹，高分辨率重点看局部、外围低分辨率处理。  
+  论文：[arXiv:2105.14173](https://arxiv.org/abs/2105.14173)
+
+- **AdaGlimpse**  
+  近年的主动视觉探索工作，能在任意位置和尺度选 glimpse。  
+  论文：[arXiv:2404.03482](https://arxiv.org/abs/2404.03482)
+
+这类方法特别适合：
+- clutter 很重的图像
+- 大图中的小目标
+- 希望减少算力消耗的场景
+- 细粒度识别、医学图像、遥感图像
+
+### 2. 不移动相机，但让网络学会“转、缩、裁”
+这是可微分的内部聚焦。
+
+- **Spatial Transformer Networks**  
+  非常经典。让网络自己学习一个仿射变换，把感兴趣区域对齐、旋转、缩放后再送入后续网络。  
+  论文：[NeurIPS 2015 PDF](https://proceedings.neurips.cc/paper_files/paper/2015/file/33ceb07bf4eeb3da587e268d663aba1a-Paper.pdf)
+
+- **Deformable Convolutional Networks**  
+  卷积采样点不再是固定网格，而是可以偏移到更有用的位置，相当于“局部感受野可变形”。  
+  论文：[arXiv:1703.06211](https://arxiv.org/abs/1703.06211)
+
+- **Deformable DETR**  
+  把“只看少量关键采样点”的思想放进 Transformer 检测器里，是“局部聚焦”最成功的现代实现之一。  
+  论文：[arXiv:2010.04159](https://arxiv.org/abs/2010.04159)
+
+这条路线的核心价值是：  
+**不是把整张图均匀看一遍，而是把注意力集中在最有判别力的空间位置。**
+
+### 3. 窗口注意力：把“看局部”做成标准模块
+这是近几年最主流的视觉 Transformer 路线。
+
+- **Swin Transformer**  
+  用局部窗口 attention，再通过 shifted window 让相邻窗口交互。  
+  论文：[arXiv:2103.14030](https://arxiv.org/abs/2103.14030)
+
+- **Focal Transformer**  
+  近距离精细看，远距离粗粒度看，属于“局部+稀疏全局”的折中。  
+  论文：[arXiv:2107.00641](https://arxiv.org/abs/2107.00641)
+
+这一类方法的意义非常大，因为它证明了：  
+**“只看局部”不只是为了可解释性，更是为了让模型在高分辨率输入上可扩展。**
+
+---
+
+## 文本领域：从“关注一个片段”发展到“长文本局部窗口建模”
+
+文本里“专注某一段”的做法主要有两条线。
+
+### 1. 对文档中某些词/句/片段赋予更高权重
+- **Hierarchical Attention Networks (HAN)**  
+  先在词级别关注，再在句子级别关注，是“聚焦文本局部片段”的经典工作。  
+  论文：[NAACL 2016 PDF](https://aclanthology.org/N16-1174.pdf)
+
+- **Rationalizing Neural Predictions**  
+  不只是给 attention 权重，而是直接选出一小段文本作为“理由”，非常接近“只看文中一段”。  
+  论文：[ACL Anthology](https://aclanthology.org/D16-1011/)  
+  arXiv：[1606.04155](https://arxiv.org/abs/1606.04155)
+
+- **SpanPredict**  
+  明确提取对预测最关键的 document spans。  
+  论文：[NAACL 2021](https://aclanthology.org/2021.naacl-main.413/)
+
+- **SPECTRA**  
+  稀疏、结构化地选择文本 rationale。  
+  论文：[EMNLP 2021](https://aclanthology.org/2021.emnlp-main.525/)
+
+这条线更偏“可解释局部选择”。
+
+### 2. 为了长文本建模，只在窗口内注意
+这条线是现在 NLP 长上下文建模的主流。
+
+- **Transformer-XL**  
+  通过 segment recurrence 跨段保留上下文，是早期“按段处理长文本”的关键工作。  
+  论文：[arXiv:1901.02860](https://arxiv.org/abs/1901.02860)
+
+- **Reformer**  
+  用 LSH attention，减少全局 attention 开销。  
+  论文：[arXiv:2001.04451](https://arxiv.org/abs/2001.04451)
+
+- **Longformer**  
+  最典型的“滑动窗口 attention + 少量全局 token”。  
+  论文：[arXiv:2004.05150](https://arxiv.org/abs/2004.05150)
+
+- **BigBird**  
+  局部窗口 + 全局 token + 随机稀疏连接，是长文本稀疏注意力经典论文。  
+  论文：[arXiv:2007.14062](https://arxiv.org/abs/2007.14062)
+
+- **Routing Transformer**  
+  按内容聚类，让 token 主要关注“相关 token 簇”。  
+  论文：[arXiv:2003.05997](https://arxiv.org/abs/2003.05997)
+
+- **Mixture of Attention Spans (2024)**  
+  不同头、不同层使用不同窗口长度，属于很新的“异构滑窗”思路。  
+  论文：[arXiv:2406.14909](https://arxiv.org/abs/2406.14909)
+
+文本领域的结论很清楚：  
+**如果输入很长，全局 attention 往往不划算；局部窗口+少量全局通道是目前最稳定的工程方案。**
+
+---
+
+## 雷达领域：有，但更常见的是“局部/稀疏注意力”，不是物理转动视角
+
+雷达里也有“聚焦一个范围”的方法，但与图像不同，**主动转动视角**在自动驾驶毫米波雷达里并不是主流，因为传感器往往固定安装。更常见的是：
+
+- 在 `range-azimuth-doppler-elevation` 张量上做空间/通道注意力
+- 在稀疏 radar points / pillars 上做局部自注意力
+- 在 radar-camera fusion 中通过 ROI 或局部 query 聚焦某个区域
+
+### 代表论文
+- **RPFA-Net**  
+  4D radar pillar feature attention，较早的高相关工作。  
+  论文：[IEEE Xplore](https://ieeexplore.ieee.org/document/9564754/)
+
+- **RMSA-Net**  
+  4D radar 多尺度注意力网络。  
+  论文：[IEEE Xplore](https://ieeexplore.ieee.org/document/10409602/)
+
+- **T-FFTRadNet**  
+  把 Swin Transformer 引入雷达检测，从 raw ADC / FFT 表征中建模。  
+  论文：[arXiv:2303.16940](https://arxiv.org/abs/2303.16940)
+
+- **RadarPillars**  
+  用 PillarAttention 处理 4D radar point clouds。  
+  论文：[arXiv:2408.05020](https://arxiv.org/abs/2408.05020)
+
+- **RADE-Net**  
+  在 RADE 张量上使用空间和通道注意力。  
+  论文：[arXiv:2602.19994](https://arxiv.org/abs/2602.19994)
+
+- **SpaRC**  
+  radar-camera 融合里用了 local self-attention 和 range-adaptive aggregation，非常贴近你说的“让网络聚焦某个范围”。  
+  论文：[arXiv:2411.19860](https://arxiv.org/abs/2411.19860)
+
+### 雷达方向的现实判断
+- 如果你说的是**固定车载雷达**，主流不是“转动视角”，而是**在张量/点云/柱状特征里做局部注意力与ROI聚焦**。
+- 如果你说的是**机器人扫描式雷达或主动感知系统**，那就可以和 active vision / next-best-view 接轨，但论文数量明显少于视觉。
+
+---
+
+## 研究脉络怎么理解
+
+从大的脉络看，这个方向经历了三步：
+
+1. **先证明“只看局部也能学得更好”**  
+   代表是 glimpse、hard attention、HAN、rationale extraction。
+
+2. **再证明“局部关注还能更高效”**  
+   代表是 Longformer、BigBird、Swin、Focal Transformer。
+
+3. **最后发展到“局部范围不是固定的，而是动态学出来的”**  
+   代表是 STN、Deformable ConvNets、Deformable DETR、RadarPillars、SpaRC。
+
+所以答案不是“有没有”，而是：  
+**已经从一个技巧发展成了一套统一范式。**
+
+---
+
+## 最值得优先读的论文清单
+
+如果你想先抓住主线，我建议优先读这 12 篇：
+
+### 总览/综述
+- **View planning in robot active vision: A survey of systems, algorithms, and applications**  
+  [PDF](https://link.springer.com/content/pdf/10.1007/s41095-020-0179-3.pdf)
+
+- **Long-context Transformers: A Survey**  
+  [PDF](https://ieeexplore.ieee.org/iel7/9586780/9586750/09587279.pdf)
+
+- **Radars for Autonomous Driving: A Review of Deep Learning Methods and Challenges**  
+  [IEEE](https://ieeexplore.ieee.org/document/10242101/)  
+  [arXiv:2306.09304](https://arxiv.org/abs/2306.09304)
+
+- **A Survey of Deep Learning Based Radar and Vision Fusion for 3D Object Detection in Autonomous Driving**  
+  [arXiv:2406.00714](https://arxiv.org/abs/2406.00714)
+
+### 图像主线
+- **Recurrent Models of Visual Attention**  
+  [NeurIPS 2014](https://proceedings.neurips.cc/paper_files/paper/2014/file/09c6c3783b4a70054da74f2538ed47c6-Paper.pdf)
+
+- **Spatial Transformer Networks**  
+  [NeurIPS 2015](https://proceedings.neurips.cc/paper_files/paper/2015/file/33ceb07bf4eeb3da587e268d663aba1a-Paper.pdf)
+
+- **Deformable Convolutional Networks**  
+  [arXiv:1703.06211](https://arxiv.org/abs/1703.06211)
+
+- **Deformable DETR**  
+  [arXiv:2010.04159](https://arxiv.org/abs/2010.04159)
+
+- **Swin Transformer**  
+  [arXiv:2103.14030](https://arxiv.org/abs/2103.14030)
+
+### 文本主线
+- **Longformer**  
+  [arXiv:2004.05150](https://arxiv.org/abs/2004.05150)
+
+- **BigBird**  
+  [arXiv:2007.14062](https://arxiv.org/abs/2007.14062)
+
+- **Rationalizing Neural Predictions**  
+  [ACL Anthology](https://aclanthology.org/D16-1011/)
+
+### 雷达主线
+- **RadarPillars**  
+  [arXiv:2408.05020](https://arxiv.org/abs/2408.05020)
+
+- **SpaRC**  
+  [arXiv:2411.19860](https://arxiv.org/abs/2411.19860)
+
+- **T-FFTRadNet**  
+  [arXiv:2303.16940](https://arxiv.org/abs/2303.16940)
+
+---
+
+## 哪些论文和你的问题“最贴脸”
+
+如果你的关注点是“**只聚焦一个范围以提升该范围内特征提取**”，最贴切的是这几类：
+
+- 图像局部块：`RAM`、`RA-CNN`、`FoveaTer`
+- 可学习局部采样：`STN`、`Deformable ConvNets`、`Deformable DETR`
+- 文本某一段：`Rationalizing Neural Predictions`、`SpanPredict`、`SPECTRA`
+- 长文本窗口化：`Longformer`、`BigBird`
+- 雷达某个 range/azimuth/doppler 范围：`RPFA-Net`、`RMSA-Net`、`RadarPillars`、`SpaRC`
+
+如果你愿意，我下一步可以继续帮你做两件更具体的事之一：
+
+1. 按你的研究方向，进一步缩成一版 **“只保留最适合你场景的 10 篇论文精读清单”**。  
+2. 直接给你整理成 **表格版文献综述**，包含 `论文-任务-聚焦机制-适用模态-优缺点-可复现资源`。

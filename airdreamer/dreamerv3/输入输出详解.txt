@@ -1,0 +1,412 @@
+toolName: todo_write
+            
+status: success
+          
+Todos updated: 3 items
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: drone_omnidrones.py 中如何定义 obs_space/action_space/step/reset 返回的张量，以及 drone_state 的构造与使用位置
+          
+
+        
+            
+toolName: view_folder
+            
+status: success
+          
+/home/bdi/yck/OmniDrones
+          
+
+        
+            
+toolName: file_search
+            
+status: success
+          
+file_pattern: **/omni_drones/**/*.py
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: OmniDrones 中 drone.get_state() 的实现，以及返回状态向量的维度/字段含义
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py
+          
+
+        
+            
+toolName: search_by_regex
+            
+status: success
+          
+query: def _compute_obs|def _lidar_obs|def _compute_reward|def _check_done|term_reason|_get_obs_state
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: euler_to_quaternion 返回的四元数顺序（xyzw 还是 wxyz），以及 get_world_poses/get_velocities 的输出格式
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/OmniDrones/omni_drones/views/__init__.py
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/OmniDrones/omni_drones/actuators/rotor_group.py
+          
+
+        
+            
+toolName: todo_write
+            
+status: success
+          
+Todos updated: 3 items
+          
+
+        
+            
+toolName: file_search
+            
+status: success
+          
+file_pattern: **/hummingbird*.yaml
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/OmniDrones/omni_drones/robots/assets/usd/hummingbird.yaml
+          
+
+        
+            
+toolName: search_by_regex
+            
+status: success
+          
+query: class _SimArena|def acquire\(|def release\(|def step\(|_ensure_scene|_env_positions|replicate_physics
+          
+
+        
+            
+toolName: view_files
+            
+status: success
+          
+            
+filePath: /home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py
+          
+
+        
+            
+toolName: todo_write
+            
+status: success
+          
+Todos updated: 3 items
+          
+
+        
+            
+toolName: todo_write
+            
+status: success
+          
+Todos updated: 3 items
+          
+下面按“对外 I/O（DreamerV3 看到的）→ 内部张量形状（torch 里跑的）→ 每个维度物理意义 → 代码路径”把这个环境讲透。核心入口是 [drone_omnidrones.py](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py) 里的 `class OmniDronesDrone`，而 `drone_state` 的字段定义来自 OmniDrones 的无人机实现，典型是 [multirotor.py](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py)。
+
+---
+
+## **1) 环境对外输入/输出（DreamerV3 视角）**
+
+### **动作 act_space（输入）**
+定义在 [drone_omnidrones.py:act_space](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L750-L757)：
+
+- `action['reset']`: `bool`  
+- `action['action']`: `float32`，形状 `(act_dim,)`，取值范围 `[-1, 1]`
+
+其中：
+- `act_dim = int(self._drone.action_spec.shape[-1])`，在 [drone_omnidrones.py:_setup_scene](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L958-L1012) 里设置。
+- 对于默认 `drone_model='hummingbird'`，其旋翼数 `num_rotors=4`（见 [hummingbird.yaml](file:///home/bdi/yck/OmniDrones/omni_drones/robots/assets/usd/hummingbird.yaml#L12-L43)），所以：
+  - `act_dim = 4`
+
+### **观测 obs_space（输出）**
+定义在 [drone_omnidrones.py:obs_space](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L737-L749)：
+
+- `obs['state']`: `float32`，形状 `(obs_dim,)`
+- `obs['lidar']`: `float32`，形状 `(hres, vres)`（注意顺序就是水平×垂直）
+- `obs['reward']`: `float32` 标量
+- `obs['is_first']`: `bool`
+- `obs['is_last']`: `bool`
+- `obs['is_terminal']`: `bool`
+- `obs['log/term_reason']`: `int32` 标量（终止原因枚举 id）
+
+其中：
+- `lidar` 默认参数在 `__init__` 里读取：[drone_omnidrones.py#L713-L723](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L713-L723)，默认 `hres=36, vres=4`，所以默认 `lidar.shape == (36, 4)`。
+- `obs_dim = drone_state_dim + 3`（多出来的 3 是目标相对位置 rpos），见 [drone_omnidrones.py:_setup_scene](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1007-L1011)。
+
+---
+
+## **2) 内部关键张量的真实形状（torch 视角）**
+
+这个封装为了兼容 Dreamer，把批量维“压成单环境单无人机”，所以内部常见形状是：
+
+- `act`：在 [drone_omnidrones.py:_omni_pre_step](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L764-L777) 里做了 reshape  
+  - numpy：`(act_dim,)`
+  - torch：`(1, 1, act_dim)`
+
+- `drone_state = self._drone.get_state()`：在 [drone_omnidrones.py:_get_obs_state](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1133-L1141)  
+  - torch：`(1, 1, drone_state_dim)`
+
+- `rpos = target_local - drone_state[..., :3]`：  
+  - torch：`(1, 1, 3)`
+
+- `obs_vec = cat([rpos, drone_state], -1).reshape(-1)`：  
+  - torch：`(obs_dim,)`（被 flatten 成一维）
+  - 最终转 numpy float32：`(obs_dim,)`
+
+---
+
+## **3) `drone_state` 每个维度是什么（形状 + 物理意义 + 索引）**
+
+### **3.1 状态向量的来源与总维度**
+对默认多旋翼（MultirotorBase）而言，`get_state()` 在 [multirotor.py:get_state](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L286-L308)：
+
+```python
+state = [pos(3), rot(4), vel(6), heading(3), up(3), throttle(num_rotors)]
+# 总维度 = 3 + 4 + 6 + 3 + 3 + num_rotors = 19 + num_rotors
+```
+
+对应 `state_spec` 也明确写了 `state_dim = 19 + self.num_rotors`（见 [multirotor.py#L77-L79](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L77-L79)）。
+
+对 `hummingbird`（4 旋翼）：
+- `drone_state_dim = 19 + 4 = 23`
+
+### **3.2 关键坐标系约定（非常重要）**
+- `pos` 是“环境局部坐标系（env-local）”下的位置（米）。原因：`get_state(env_frame=True)` 会执行 `pos.sub_(self._envs_positions)`（见 [multirotor.py#L286-L290](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L286-L290)），而封装在场景初始化时设置了  
+  `self._drone._envs_positions = self._env_pos.reshape(1,1,3)`（见 [drone_omnidrones.py:_setup_scene](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L970-L976)）。
+- `rot` 四元数的顺序是 **(w, x, y, z)**（wxyz）。证据：`euler_to_quaternion` 返回 `[qw,qx,qy,qz]`（见 [math.py:euler_to_quaternion](file:///home/bdi/yck/OmniDrones/omni_drones/utils/math.py#L56-L78)），以及视图层把底层 transform 的四元数重排成 `[w,x,y,z]`（见 [views/__init__.py:get_world_poses](file:///home/bdi/yck/OmniDrones/omni_drones/views/__init__.py#L250-L263) 返回 `poses[..., [6,3,4,5]]`）。
+- `vel` 是 6 维速度，来自 Isaac 的 `get_velocities()`；在这套代码里它被当作 **世界坐标系（world）** 下的  
+  - 线速度 `(vx, vy, vz)`（m/s）  
+  - 角速度 `(wx, wy, wz)`（rad/s）  
+  佐证：环境用 `drone_state[...,9]` 判断“下落速度过大”触地（见 [drone_omnidrones.py#L1238-L1246](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1238-L1246)），而按下面索引表，`9` 正好是 `vz`。
+
+> 代码里也算了 `vel_b`（机体系速度），但 **并没有放进 state**：`self.vel` 绑定的是 `self.vel_w`（见 [multirotor.py#L156-L158](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L156-L158)），`get_state()` 里 `self.vel_w[:] = vel_w`，最后拼的是 `self.vel`（即世界系）。
+
+### **3.3 `drone_state` 索引表（MultirotorBase）**
+设 `R = num_rotors`（hummingbird 下 `R=4`），则 `drone_state` 长度 `19+R`，各段含义：
+
+- **[0:3]**（3 维）`pos = (x, y, z)`  
+  - 单位：m  
+  - 坐标系：env-local（环境局部坐标；每台无人机/每个 slot 的原点由 `_env_pos` 平移得到）  
+- **[3:7]**（4 维）`rot = (w, x, y, z)`  
+  - 单位：无  
+  - 含义：机体姿态四元数；用于把机体系基向量旋到世界系（因为 `heading/up` 都是用 `quat_axis(rot, axis=...)` 得到的）  
+- **[7:13]**（6 维）`vel = (vx, vy, vz, wx, wy, wz)`  
+  - `v*`：m/s（世界系线速度）  
+  - `w*`：rad/s（世界系角速度）  
+- **[13:16]**（3 维）`heading`  
+  - 单位：无（单位向量）  
+  - 含义：机体 **x 轴** 在世界系中的方向 `quat_axis(rot, axis=0)`（见 [torch.py:quat_axis](file:///home/bdi/yck/OmniDrones/omni_drones/utils/torch.py#L228-L233)）  
+- **[16:19]**（3 维）`up`  
+  - 单位：无（单位向量）  
+  - 含义：机体 **z 轴** 在世界系中的方向 `quat_axis(rot, axis=2)`  
+- **[19:19+R]**（R 维）`throttle_scaled`  
+  - 范围：约 `[-1, 1]`  
+  - 含义：每个旋翼的“内部油门状态（经过一阶惯性）”，将 `[0,1]` 线性映射到 `[-1,1]`（见 [multirotor.py#L303-L305](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L303-L305) 的 `self.throttle * 2 - 1`）。  
+  - 注意：`RotorGroup` 里真正用来算推力的是 `t = throttle^2`（见 [rotor_group.py#L54-L66](file:///home/bdi/yck/OmniDrones/omni_drones/actuators/rotor_group.py#L54-L66)），所以这里的 throttle 更像“归一化转速的平方根状态”。
+
+---
+
+## **4) `obs['state']` 的每个维度是什么（含 rpos）**
+
+`obs['state']` 的构造在 [drone_omnidrones.py:_get_obs_state](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1133-L1141)：
+
+- `rpos = target_local - drone_state[..., :3]`：形状 `(1,1,3)`  
+  - **物理意义**：目标点相对无人机的位置向量（env-local，米）  
+  - 记作 `(dx, dy, dz)`，指向“从无人机当前位置指向目标”的方向与距离  
+- `obs_vec = concat([rpos, drone_state])`：形状 `(1,1,3+drone_state_dim)`，最后 flatten 成 `(obs_dim,)`
+
+因此 `obs['state']` 的索引是：
+
+- **[0:3]**：`rpos = (dx, dy, dz)`（m，env-local）
+- **[3:3+drone_state_dim]**：完整 `drone_state`（上节索引整体右移 3）
+
+对 `hummingbird`：
+- `drone_state_dim=23`
+- `obs_dim = 3 + 23 = 26`
+- `obs['state'].shape == (26,)`
+
+---
+
+## **5) `obs['lidar']` 的形状与物理意义**
+
+### **形状**
+- `lidar.shape == (hres, vres)`，由 [drone_omnidrones.py:__init__](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L713-L723) 设置，默认 `(36,4)`。
+- 生成在 [drone_omnidrones.py:_lidar_obs](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1107-L1132)。
+
+### **数值含义**
+代码做的是：
+
+- `dists = ||ray_hit - ray_origin||`（并裁剪到最大量程 `lidar_range`）
+- 返回 `scan = lidar_range - dists`
+
+所以每个 cell 是一个“接近度/余量”：
+- `scan ≈ 0`：这条射线打到的最近物体距离接近 `lidar_range`（或者量程内没有命中，被 clamp 到 range）
+- `scan` 越大：障碍物越近
+- 最大接近 `lidar_range`：非常贴近（`dists≈0`）
+
+另外代码严格检查 `ray_count == hres*vres`，不允许 padding/truncation（见 [drone_omnidrones.py#L1121-L1129](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1121-L1129)）。
+
+---
+
+## **6) 动作 `action` 怎么变成推力/力矩（物理链路）**
+
+动作进入动力学的主链路是：
+
+1) [drone_omnidrones.py:step](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L758-L763)  
+2) [drone_omnidrones.py:_omni_pre_step](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L764-L777) 把 `(act_dim,)` reshape 成 `(1,1,act_dim)`，然后：
+3) `self._drone.apply_action(act)`（MultirotorBase 的实现见 [multirotor.py:apply_action](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L244-L285)）
+
+关键映射在 [rotor_group.py:forward](file:///home/bdi/yck/OmniDrones/omni_drones/actuators/rotor_group.py#L54-L66)：
+
+- 输入 `cmds ∈ [-1,1]`
+- 先映射到 `[0,1]`：`(cmds+1)/2`
+- 再取平方根：`target_throttle = sqrt(clamp((cmds+1)/2))`
+- 用一阶惯性更新内部 `throttle`（上升/下降不同时间常数）
+- 推力与反扭矩用 `t = throttle^2` 计算：
+  - `thrusts = t * KF`（近似等价于“归一化转速平方 × 系数”）
+  - `moments = (t * KM) * -directions`
+
+在 [multirotor.py:apply_action](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L244-L285) 中：
+- 把每个旋翼推力放进旋翼局部 z 轴：`self.thrusts[...,2] = thrusts`
+- 计算合扭矩并施加到机体
+- 同时记录 `throttle_difference`（动作变化幅度），用于奖励里的平滑项（见 [drone_omnidrones.py#L1206-L1208](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1206-L1208)）。
+
+---
+
+## **7) 一步仿真的数据流（reset / step / done）**
+
+### **reset()**
+见 [drone_omnidrones.py:reset](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L842-L896)：
+
+- 重置旋翼内部状态 `_reset_idx`，并把 `throttle` 置 0
+- 采样：
+  - 起点 `start_local`（env-local）
+  - 目标 `target_local`（env-local）
+- 把世界坐标设置为：`pos_world = pos_local + env_pos`（见 [drone_omnidrones.py#L877-L883](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L877-L883)）
+- 观测输出：
+  - `obs['state']`：`rpos + drone_state`
+  - `obs['lidar']`：一次雷达扫描
+  - `is_first=True, reward=0`
+
+### **step(action)**
+见 [drone_omnidrones.py:step / _omni_pre_step / _omni_post_step](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L758-L787)：
+
+- 如果 `reset=True` 或上一回合已 done：
+  - 立即 `reset()`，并缓存返回值 `_omni_cached_reset_obs`
+  - 这次不推进物理（返回 reset 的观测）
+- 否则：
+  - 将 `action['action']` 转 torch `(1,1,act_dim)`
+  - `apply_action()` 把力/力矩写入仿真
+  - `arena.step(substeps)` 进行物理推进（可能渲染/录屏）
+  - `_compute_obs(effort)` 读取状态并计算 reward/done
+
+### **done / is_last / is_terminal / term_reason**
+在 [drone_omnidrones.py:_compute_obs](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1195-L1284)：
+
+- `terminal`（真正失败/终止）：越界、NaN、碰撞、倾覆等
+- `timeout`：步数达到 `max_episode_length`
+- `is_last = terminal or timeout`
+- `is_terminal = terminal`（区分 timeout）
+- `log/term_reason` 是字符串枚举映射到 id，枚举表见 [drone_omnidrones.py#L700-L703](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L700-L703)
+
+---
+
+如果你还希望“更细到每个量的坐标系/是否归一化”，我建议你在 IDE 里直接看这几段（它们决定了所有语义）：
+- [drone_omnidrones.py:_get_obs_state](file:///home/bdi/yck/air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py#L1133-L1141)（obs 拼接与 flatten）
+- [multirotor.py:get_state](file:///home/bdi/yck/OmniDrones/omni_drones/robots/drone/multirotor.py#L286-L308)（`drone_state` 字段顺序）
+- [views/__init__.py:get_world_poses](file:///home/bdi/yck/OmniDrones/omni_drones/views/__init__.py#L250-L279)（四元数重排为 wxyz）
+- [rotor_group.py:forward](file:///home/bdi/yck/OmniDrones/omni_drones/actuators/rotor_group.py#L54-L66)（动作→油门→推力/力矩的数学映射）
+
+如果你用的不是 `hummingbird`（比如 `firefly` 6 旋翼），我也可以按你实际 `drone_model` 把 `act_dim / drone_state_dim / obs_dim` 具体数字和索引表再实例化一遍。

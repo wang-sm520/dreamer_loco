@@ -1,0 +1,129 @@
+这是一个非常经典且在强化学习（特别是多模态和机器人强化学习）中经常被探讨的问题。你提到的担忧是完全合理且在实践中非常常见的。
+
+在 `drone_omnidrones.py` 的场景中，LiDAR 提供的是 $30 \times 360 = 10800$ 维的高维稀疏输入，而无人机自身状态（State）只有 20 多维（通常包含位置、姿态、线速度、角速度等高密度运动学信息）。如果直接将这两者拼接（Concatenation）后输入给策略神经网络，大概率会导致 **状态信息被稀释**，并引发一系列优化问题。
+
+以下是对该问题的深入分析以及学术界相关的研究和解决方案：
+
+### 1. 核心问题分析
+
+#### A. 梯度支配与模态偏见 (Gradient Dominance & Modality Bias)
+在深度神经网络的初始层，如果直接拼接 $[lidar, state]$（总共 10820 维），权重矩阵绝大部分的参数都将用于处理 LiDAR 的 10800 维输入。在反向传播时，来自 LiDAR 特征的梯度总量会远远超过那 20 维 State 的梯度。这会导致网络在训练初期迅速被高维输入“劫持”（即 **模态支配 Modality Dominance**），网络可能会试图从 LiDAR 中寻找解决任务的捷径，而完全忽略了那 20 维至关重要的自身动态信息。
+
+#### B. 信息密度不匹配 (Information Density Mismatch)
+* **State (20维)**：信息密度极高，每一个维度的细微变化（如偏航角速度）都对当前决策有决定性影响。
+* **LiDAR (10800维)**：信息密度极低，存在大量冗余（例如周围如果没有障碍物，这 10800 个值可能全是一样的最大探测距离）。
+把高密度信息和低密度信息放在同一层进行无差别的线性组合，网络很难在海量低频/冗余噪声中“保护”好那 20 维的敏感信息。
+
+#### C. 表征坍塌 (Representation Collapse)
+由于 LiDAR 的维度过高，在端到端的强化学习中很容易发生“特征坍塌”。由于网络发现通过简单的 LiDAR 模式就能获得短期奖励（比如“看到墙就躲”），它就会停止探索如何精细利用自身的动力学状态（比如“利用当前的角速度顺势进行漂移过弯”），导致高阶动作的表征无法被学习出来。
+
+---
+
+### 2. 相关研究与理论支撑
+
+在多模态融合（Multi-modal Fusion）和机器人强化学习领域，这种现象受到了广泛关注：
+
+* **模态贪婪 / 模态支配 (Modality Greediness / Dominance)**：研究表明，当融合视觉/LiDAR（高维）和本体感觉/Proprioception（低维）时，网络往往会发生 "Modality Collapse"（模态坍塌）。高维感官会主导表征，导致低维的关键信号（如触觉、关节速度）失效。近期的研究（如 2025/2026 年针对多模态表示坍塌的研究）提出了使用秩约束（Rank-targeted Fusion）或自适应权重分配来解决某个模态过度支配的问题。
+* **不对称多模态强化学习 (Asymmetric Multi-modal RL)**：当具有截然不同空间维度的输入同时存在时，早期的“直接拼接”（Early Fusion）被证明是次优的。学术界倾向于指出，缺乏独立特征提取的高低维混合会导致策略梯度的方差急剧增大。
+
+---
+
+### 3. 推荐的解决方案（如何修改你的网络架构）
+
+为了避免高密度的 20 维 State 被 10800 维的 LiDAR 稀释，通常不建议直接拼接。你可以采用以下几种经典的架构优化：
+
+#### 方法一：后期融合 / 双分支架构 (Late Fusion / Two-Stream Architecture) **[最推荐]**
+这是最标准的做法。不要直接拼接原始输入，而是**先对高维的 LiDAR 进行降维和特征提取**。
+1. 将 10800 维的 LiDAR 输入到一个独立的特征提取器中（例如一个小型的 CNN 或者多层 MLP），将其压缩成一个紧凑的高级表征（例如 64 维或 128 维）。
+2. 将这 64 维的 LiDAR 特征与 20 维的 State 进行拼接（Concat）。
+3. 将拼接后的 84 维向量输入给最终的策略 MLP（Policy Network）。
+*这样，State 的 20 维和 LiDAR 提炼后的 64 维在数量级上是可比的，网络可以更公平地利用两者。*
+
+#### 方法二：模态级联 / 注意力机制 (Cross-Attention)
+如果你希望 LiDAR 信息不仅是被压缩，还能根据当前状态进行筛选，可以引入注意力机制：
+* 将 20 维的 State 作为 `Query`。
+* 将 LiDAR （可以 reshape 成 30x360 的序列）经过简单映射后作为 `Key` 和 `Value`。
+* 让当前的无人机状态去“主动关注” LiDAR 中相关的区域（比如在高速前进时，状态向量会引导网络只关注前方的 LiDAR 射线）。
+
+#### 方法三：辅助损失 (Auxiliary Losses)
+为了强迫网络不要忘记那 20 维的状态，可以在特征融合后的隐藏层拉出一个分支，做两个辅助任务（Auxiliary Task）：
+1. **状态重构**：尝试从融合后的隐状态中还原出原本的 20 维 State。
+2. **前向动力学预测**：给定当前隐状态和动作，预测下一帧的 20 维 State。
+这能通过梯度反传强制融合后的特征保留足够的 State 信息。
+
+#### 方法四：梯度调制 (Gradient Modulation / Blending)
+在训练时，监控两种模态传回的梯度范数。如果发现传入 LiDAR 编码器的梯度远远大于传入 State 处理层的梯度，则动态地进行梯度裁剪（Gradient Clipping）或者给 LiDAR 分支乘上一个 $< 1$ 的缩放因子，从而抑制其“过度学习”。
+
+**总结：**
+对于你当前 `30x360 LiDAR + 20维 State` 的环境，**强烈建议在进入 DreamerV3 核心 RNN/MLP 之前，在网络结构中给 LiDAR 加上一个专属的 Encoder 把它降维（比如用 1D CNN 或者 MLP 压到 64 维），然后再与 State 融合**。直接拼接绝对会造成你担心的“信息稀释”和“性能次优”现象。
+
+结论：你的担心是有依据的，而且在你当前这份实现里风险不小。更准确地说，不是“`state` 一定学不到”，而是 `state` 很容易在表征学习阶段被弱化：world model 更倾向先把高维 `lidar` 拟合好，导致后续 policy 读到的 latent 对 `state` 不够敏感。你说的“信息密度被稀释”，从优化角度更接近三个机制叠加：早期 raw fusion、`lidar` 空间结构被丢掉、以及 loss/gradient imbalance。
+
+## 为什么在你这份代码里风险更大
+- `state` 是相对目标位置 `rpos` 加无人机自身 `drone_state`，而 `lidar` 是 `360 x 30 = 10800` 维的浮点 scan；如果 `state` 是 23-26 维，维度比大约是 `400-500:1`。而且这里的 `lidar` 还是 `scan = lidar_range - best_dists`，空旷区域很多 beam 会接近 `0`，确实有你说的“低密度、高冗余”特征。相关构造在 `air_dreamer/dreamerv3/embodied/envs/drone_omnidrones.py`。
+
+- 在当前 `DreamerV3` 实现里，`lidar` 不会走图像 CNN，而是和 `state` 一样走 vector encoder；`DictConcat` 会先把每个 key 展平，再直接拼接到同一个 MLP。这本质上就是 raw early fusion。
+
+```476:500:air_dreamer/dreamerv3/embodied/jax/nets.py
+for key in self.keys:
+  space = self.spaces[key]
+  x = xs[key]
+  # ...
+  x = self.squish(x)
+  x = x.astype(COMPUTE_DTYPE)
+  x = x.reshape((*x.shape[:bdims + self.fdims - 1], -1))
+  ys.append(x)
+return jnp.concatenate(ys, -1)
+```
+
+- 严格说，也不是“原始观测直接进 actor 头”，而是先经过 `Encoder -> RSSM`，policy 最终读的是 latent `feat`。所以真正的风险点在 encoder/world model，而不是最后一层 actor MLP。
+
+```126:136:air_dreamer/dreamerv3/dreamerv3/agent.py
+def policy(self, carry, obs, mode='train'):
+  (enc_carry, dyn_carry, dec_carry, prevact) = carry
+  kw = dict(training=False, single=True)
+  reset = obs['is_first']
+  enc_carry, enc_entry, tokens = self.enc(enc_carry, obs, reset, **kw)
+  dyn_carry, dyn_entry, feat = self.dyn.observe(
+      dyn_carry, tokens, prevact, reset, **kw)
+  policy = self.pol(self.feat2tensor(feat), bdims=1)
+```
+
+- 真正更致命的是 loss 侧也偏向 `lidar`。在 `air_dreamer/dreamerv3/embodied/jax/heads.py` 里，shape 非空的观测会被 `Agg(..., jnp.sum)` 包起来；`air_dreamer/dreamerv3/embodied/jax/outs.py` 里的 `Agg.loss()` 又是沿所有观测维度求和。这意味着如果每维误差同量级，`10800` 维 `lidar` 的重建项天然会比 `20+` 维 `state` 大几百倍，而 `air_dreamer/dreamerv3/dreamerv3/agent.py` 又对两个观测键使用同一个 `rec` 标量权重。
+
+```85:92:air_dreamer/dreamerv3/embodied/jax/heads.py
+def __call__(self, x):
+  if not hasattr(self, self.impl):
+    raise NotImplementedError(self.impl)
+  x = nets.ensure_dtypes(x)
+  output = getattr(self, self.impl)(x)
+  if self.space.shape:
+    output = outs.Agg(output, len(self.space.shape), jnp.sum)
+  assert output.pred().shape[x.ndim - 1:] == self.space.shape, (
+```
+
+- 但这不等于 `state` 必然学不到。`symlog`、RMS norm、较大的模型容量，以及 `state` 对 reward / dynamics 的直接相关性都会帮它“保命”。所以更常见的现象不是 `state` 完全失效，而是 `state` 被利用不足，表现为收敛慢、姿态/速度控制不细、靠近目标时动作不够精确。
+
+## 更准确的判断
+你的直觉方向是对的，但更准确的说法不是“信息密度高低”本身，而是：
+
+- `lidar` 维度几百倍更大，第一层参数和前向激活更容易被它主导。
+- `lidar` 被直接 flatten，空间邻域结构完全没被利用，样本效率会更差。
+- reconstruction loss 对维度求和而不是求平均，使 `lidar` 在 world model 训练里天然更重。
+- policy 只看到 latent，所以只要 encoder/world model 前面偏了，actor 后面很难补回来。
+
+所以我的判断是：**在你现在这套实现里，确实存在 `state` 被 `lidar` 弱化的结构性风险，而且这个风险主要不是 actor 侧，而是 encoder/world-model 侧。**
+
+## 相关研究
+- [Balanced Multimodal Learning via On-the-fly Gradient Modulation](https://arxiv.org/abs/2203.15332)（Peng et al., 2022）：虽然不是 RL，但讨论的正是 dominant modality 压制其他模态的优化失衡，和你这里 `lidar`/`state` 的机制很接近。
+- [BalanceBenchmark: A Survey for Multimodal Imbalance Learning](https://arxiv.org/abs/2502.10816)（Xu et al., 2025）：把“模态失衡”系统化成独立问题来综述和评测，说明这不是个别任务的偶然现象。
+- [Reinforcement Learning With Vision-Proprioception Model for Robot Planar Pushing](https://doi.org/10.3389/fnbot.2022.829437)（Cong et al., 2022）：先用 VAE 把高维视觉压成紧凑 latent，再和 proprioception 融合做 RL，是很典型的 late fusion。
+- [Virtual-to-real Deep Reinforcement Learning: Continuous Control of Mobile Robots for Mapless Navigation](https://arxiv.org/abs/1703.00420)（Tai et al., 2017）：直接拼接 laser、目标和速度可以工作，但它只用了 10 维稀疏 laser。这恰好说明“直接 concat 是否可行”高度依赖感知维度规模。
+- [World Models for Autonomous Navigation of Terrestrial Robots from LIDAR Observations](https://arxiv.org/abs/2512.03429)（Steinmetz et al., 2025）：这篇直接基于 DreamerV3，把高维 LiDAR 先编码成紧凑 latent 再进 world model，和你当前场景最贴近。
+
+## 怎么验证你这里是否真的被稀释了
+- 做 `state-only`、`lidar-only`、`full` 三组 ablation。若 `full` 相比 `lidar-only` 提升很小，就说明 `state` 没有被充分利用。
+- 看训练日志里的 `loss/state` 和 `loss/lidar`。如果临时把 `agent.report_gradnorms` 打开，还可以直接比较 `gradnorm/state` 和 `gradnorm/lidar`。
+- 最小改动 baseline 是给 `lidar` 单独加 encoder，把 `10800` 维先压到 `64/128/256` 维，再和 `state` 融合；同时把 `lidar` 重建 loss 改成按维度平均，或者单独降权。
+
+如果你愿意，我可以下一步直接结合这份 `DreamerV3` 代码，给你设计一个“最小侵入”的 `lidar encoder + late fusion` 改法。
