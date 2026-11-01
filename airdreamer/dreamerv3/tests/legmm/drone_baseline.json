@@ -1,0 +1,82 @@
+{
+  "drone_nav": {
+    "preset": "drone_nav",
+    "n_params": 312515857,
+    "n_param_tensors": 354,
+    "param_keys_sha": "e082b1f9ef1ae716fa199a1593b207407b94a29e5cfa79a78922f25c46b0a142",
+    "loss_keys": [
+      "con",
+      "depth",
+      "dyn",
+      "policy",
+      "rep",
+      "repval",
+      "rew",
+      "state",
+      "value"
+    ],
+    "loss_scales": {
+      "con": 1.0,
+      "depth": 1.0,
+      "dyn": 1.0,
+      "policy": 1.0,
+      "rep": 0.1,
+      "repval": 0.3,
+      "rew": 1.0,
+      "state": 1.0,
+      "value": 1.0
+    },
+    "enc_keys": [
+      "depth",
+      "state"
+    ],
+    "dec_keys": [
+      "depth",
+      "state"
+    ]
+  },
+  "drone_multi": {
+    "preset": "drone_multi",
+    "n_params": 576964234,
+    "n_param_tensors": 366,
+    "param_keys_sha": "b1ec52a51bc244b6bbb3ade481c1bbfd8430e919ee518b9f600d737e6bbb453a",
+    "loss_keys": [
+      "con",
+      "depth",
+      "direction",
+      "dyn",
+      "lidar",
+      "policy",
+      "rep",
+      "repval",
+      "rew",
+      "state",
+      "value"
+    ],
+    "loss_scales": {
+      "con": 1.0,
+      "depth": 2.0,
+      "direction": 2.0,
+      "dyn": 1.0,
+      "lidar": 2.0,
+      "policy": 1.0,
+      "rep": 0.05,
+      "repval": 0.3,
+      "rew": 1.0,
+      "state": 2.0,
+      "value": 1.0
+    },
+    "enc_keys": [
+      "depth",
+      "direction",
+      "lidar",
+      "state"
+    ],
+    "dec_keys": [
+      "depth",
+      "direction",
+      "lidar",
+      "state"
+    ]
+  }
+}

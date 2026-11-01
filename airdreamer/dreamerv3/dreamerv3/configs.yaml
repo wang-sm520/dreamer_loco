@@ -283,6 +283,44 @@ defaults:
         segment_length_seconds: 100
         outdir: video
 
+    # legmm (A2 Pro + AIRBOT Play, depth-only mobile manipulation).
+    # NOTE: no key segment may start with depth/units/layers/rssm/bins, because the
+    # size presets apply prefix regexes such as '.*\.depth' to every flat key.
+    legmm:
+      backend: kin                 # kin = numpy kinematic stand-in (M1-M4); isaac = Isaac Lab (M6+)
+      spaces_only: False           # True: build obs/act spaces only, no simulation (train_offline)
+      hl_hz: 5
+      physics_dt: 0.005
+      max_episode_steps: 450
+      split: train                 # train | val | test_iid | test_constrained | test_unseen_layout
+      use_seed: True
+      room_size: [8.0, 8.0]
+      n_obstacles: [3, 8]
+      object: {size: [0.04, 0.08], mass: [0.05, 0.8]}   # AIRBOT Play rated payload 1.5 kg
+      max_failed_grasps: 3
+      camera_head:  {model: d435i, min_z: 0.28, max_z: 6.0, mount_xyz: [0.30, 0.0, 0.10], mount_pitch_deg: -15.0}  # TODO(calibrate)
+      camera_wrist: {model: d435i, min_z: 0.28, max_z: 2.0, mount_xyz: [-0.08, 0.0, 0.06], mount_pitch_deg: 30.0}  # set back so the object stays >= min_z at pre-grasp
+      obs_depth_dtype: uint8       # legmm.yaml: depth_dtype (renamed, see NOTE above)
+      goal_provider: {type: gt_noisy, pos_sigma: 0.03, yaw_sigma: 0.1, latency_steps: [0, 2], dropout: 0.05}  # simulated RGB teacher
+      arm: {mount_xyz: [0.10, 0.0, 0.12], reach: 0.647, min_reach: 0.15, payload: 1.5}   # AIRBOT Play; mount TODO(calibrate)
+      base: {footprint: [0.82, 0.44], vel_tau: 0.15, posture_tau: 0.4}   # first-order lag in the kin backend
+      manip_base_speed_cap: 0.15
+      reward: {w_nav: 2.0, w_ee: 3.0, r_grasp: 10.0, r_place: 20.0, r_failed_grasp: -1.0, r_drop: -10.0,
+               r_collision: -2.0, r_time: -0.01, w_smooth: 0.01, w_tilt: 0.5}
+      labels: {enabled: True, k_rollouts: 4, every_n_steps: 2, max_dist: 2.0}
+      domain_rand:
+        enabled: True
+        cam_noise_a: [0.001, 0.004]     # legmm.yaml: depth_noise_a (renamed)
+        cam_hole_frac: [0.0, 0.03]      # legmm.yaml: depth_hole_frac (renamed)
+        cam_extrinsic_sigma: {pos: 0.01, rot_deg: 1.5}
+        base_vel_tracking_err: 0.1      # relative error
+        arm_latency_steps: [0, 1]
+        object_friction: [0.4, 1.2]
+
+  # Offline datasets and legmm evaluation
+  offline: {dir: '', copy_to_replay: True, eval_every: 5000}
+  eval: {episodes: 200, video_episodes: 6, online_aff_rollouts: 4}
+
   # Replay buffer
   replay:
     size: 2e5
@@ -371,6 +409,27 @@ defaults:
     repval_grad: True
     report: True
     report_gradnorms: False
+    # legmm switches. Every default leaves drone / dronenav behaviour unchanged.
+    train_phase: online            # wm | bc | rl | online; online = original DreamerV3 behaviour
+    imag_enabled: True             # forced False by the code when train_phase in (wm, bc)
+    # Keys excluded from enc/dec. elements forbids empty lists, so the default
+    # lists the legmm label keys; it is a no-op for envs without these keys.
+    label_keys: [label_aff, label_aff_mask, label_phase]
+    # Per-key reconstruction weight overriding loss_scales.rec, as 'key=w,key=w'.
+    # A string because a dict would have keys like rec_scales.depth_head, which
+    # the size presets' '.*\.depth' regex would overwrite.
+    rec_scales: ''
+    rec_per_pixel_norm: False      # True: divide image/depth recon loss by H*W
+    skill:
+      enabled: False               # legmm: True
+      key: skill
+      action_keys: [nav, pick, place]   # index = Skill enum value
+    aff_head: {enabled: False, scale: 1.0, layers: 2, units: 512}   # 2 sigmoid outputs: [aff_pick, aff_place]
+    phase_head: {enabled: False, scale: 1.0, layers: 2, units: 512} # 3 classes: TO_PICK / HOLDING / PLACED
+    bc: {scale: 0.0, scale_end: 0.0, anneal_steps: 1}                 # rl phase: 1.0 -> 0.1
+    skill_prior: {scale: 0.0, scale_end: 0.0, anneal_steps: 1, eps: 0.05}  # rl phase: 1.0 -> 0.1
+    switch_cost: 0.0               # legmm: 0.2, penalises skill changes in imagination
+    deliberation: {enabled: False, delays: [0, 5, 10], samples: 8, horizon: 30, margin: 0.3}  # eval only
 
 # Model size presets
 sizetest: &sizetest
@@ -462,3 +521,53 @@ debug:
     .*\.hidden: 3
     .*\.blocks: 4
     .*\.depth: 2
+
+# legmm presets (merged from legmm.yaml fragment C). Must stay after the size
+# anchors above. Stage presets only hold overrides and are stacked in order:
+# --configs legmm legmm_wm
+legmm: &legmm
+  <<: *size50m                   # start with 50m; try size100m (AirDreamer scale) once stable
+  task: legmm_mm
+  batch_size: 16
+  batch_length: 128              # 25.6 s @ 5 Hz of RSSM memory context
+  report_length: 32
+  replay_context: 16
+  replay: {size: 1e6, online: True}   # uint8 depth: ~7.7 KB x 2 streams per step
+  run: {envs: 32, eval_envs: 8, train_ratio: 32, steps: 3e6, log_every: 120, save_every: 900}
+  jax: {platform: cuda, policy_devices: [0], train_devices: [0]}   # two GPUs: policy [1] / train [0]
+  env.legmm: {backend: kin}
+  agent:
+    imag_length: 30              # 6 s @ 5 Hz
+    horizon: 333
+    loss_scales: {rec: 1.0, rew: 1.0, con: 1.0, dyn: 1.0, rep: 0.1, policy: 1.0, value: 1.0, repval: 0.3}
+    label_keys: [label_aff, label_aff_mask, label_phase]
+    rec_scales: 'depth_head=1.0,depth_wrist=1.0,proprio=2.0,goal=2.0'
+    rec_per_pixel_norm: True
+    skill: {enabled: True}
+    aff_head: {enabled: True}
+    phase_head: {enabled: True}
+    switch_cost: 0.2
+
+legmm_wm:
+  agent.train_phase: wm
+  run.steps: 2e5
+legmm_bc:
+  agent.train_phase: bc
+  run.steps: 1e5
+  agent.bc: {scale: 1.0, scale_end: 1.0, anneal_steps: 1}
+legmm_rl:
+  agent.train_phase: rl
+  run.steps: 3e5
+  agent.bc: {scale: 1.0, scale_end: 0.1, anneal_steps: 200000}
+  agent.skill_prior: {scale: 1.0, scale_end: 0.1, anneal_steps: 200000, eps: 0.05}
+legmm_online:
+  agent.train_phase: online
+  run.train_ratio: 32
+  agent.bc: {scale: 0.1, scale_end: 0.0, anneal_steps: 300000}
+  agent.skill_prior: {scale: 0.1, scale_end: 0.0, anneal_steps: 300000, eps: 0.05}
+legmm_debug:            # usage: --configs legmm size1m legmm_debug
+  batch_size: 4
+  batch_length: 32
+  replay_context: 4
+  run: {envs: 2, eval_envs: 1, train_ratio: 8, steps: 2000}
+  agent.imag_length: 8

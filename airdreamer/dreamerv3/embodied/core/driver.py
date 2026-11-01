@@ -6,6 +6,15 @@ import numpy as np
 import portal
 
 
+def _probe(env, name):
+  # embodied.Wrapper raises ValueError for missing attributes, which getattr()
+  # with a default does not catch.
+  try:
+    return getattr(env, name)
+  except (AttributeError, ValueError):
+    return None
+
+
 class Driver:
 
   def __init__(self, make_env_fns, parallel=True, **kwargs):
@@ -63,10 +72,10 @@ class Driver:
       obs = [self._receive(pipe) for pipe in self.pipes]
     else:
       envs = self.envs
-      arena = getattr(envs[0], '_arena', None)
+      arena = _probe(envs[0], '_arena')
       sync = (
           arena is not None and
-          all(getattr(env, '_arena', None) is arena for env in envs) and
+          all(_probe(env, '_arena') is arena for env in envs) and
           all(hasattr(env, '_omni_pre_step') and hasattr(env, '_omni_post_step') for env in envs)
       )
       if sync:
