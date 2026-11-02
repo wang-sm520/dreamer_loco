@@ -109,3 +109,27 @@
   - 头部被手臂遮挡 2.0%；
   - 头部 min_z 以内的像素 94.2%（站在桌边时桌子前立面距相机不到 0.28 m）；
   - 腕部 D405 到物体的 z 深度：预抓取时 0.252 m，抓取时 0.167 m。两者都远大于 0.07，所以物体在**整个接近过程**中都可见。
+
+## M2：专家、标注、QA、采集（进行中，2026-11-02）
+
+### 已完成
+- `embodied/envs/legmm/planning.py`：用 Dijkstra 算栅格最短路，等价于从起点对所有候选终点同时做 A*；路径做视线捷径化；纯追踪按投影点向前取前视点。
+- `expert.py`：ScriptedExpert，用状态机执行导航、对准、直线接近、操作控制器（航点、预抓取、推进、闭合、抬起、收回）。
+  - 规划时对整条航点路径插值检查碰撞。
+  - 多样性：坏站位 30%，提前切换 20%，DART（σ=0.1，50% 的回合），约 10% 的步数为探索片段，失败后后退、重规划或换一侧。
+- `labeler.py`：从快照出发、只允许 base_adj、K=4 次 rollout；几何启发式 aff_geom。
+- `tools/label_qa.py`：审核工具，judge 可插拔，只剔除样本、不改标签值。
+- `collect.py`：采集器，写 replay chunk 和旁路表 `meta/`。
+- `dataset_stats.py`：统计和图。
+- 测试：`tests/legmm` 共 48 passed，新增 offline replay 往返、replay 中动作的 mask、专家回报高于随机、标注器不改动环境状态、QA 只改 mask。
+- 环境规则修订：持物时物体底部压到支撑面，改为阻挡手臂运动、不算掉落；记录 `drop_reason`。
+
+### 验收数字（截至目前）
+| 项 | 结果 | 来源 |
+|---|---|---|
+| 专家成功率（关闭多样性，每类 100 回合） | OPEN 0.96，WALL_BACK 0.91，SIDE_BLOCKED 0.86，LOW_FLOOR 0.83；CORNER 0.92，CUBBY 0.00 | `docs/legmm/m2_expert_eval.json` |
+| 专家成功率（开启多样性，每类 30 回合） | OPEN 0.83，WALL_BACK 0.83，SIDE_BLOCKED 0.60，LOW_FLOOR 0.77，CORNER 0.80，CUBBY 0.00 | `docs/legmm/m2_expert_eval_diversity.json` |
+| 30 h 数据集统计、aff_geom AUROC | **采集中**，见 `~/data/legmm_v1/train/dataset_stats.json` | — |
+
+### 未解决
+见 `docs/legmm/HANDOFF.md` 第 5 节：审核模型（§11 第 5 项）、失败回合比例的口径、CUBBY 专家成功率为 0、头部相机分辨率和 min_z。
