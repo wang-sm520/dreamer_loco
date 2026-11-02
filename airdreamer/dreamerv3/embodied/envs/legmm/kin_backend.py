@@ -40,7 +40,7 @@ BODY_BOX = np.array([-0.33, -0.145, -0.08, 0.39, 0.145, 0.13])
 REACH_MIN = 0.08             # min shoulder-to-wrist distance
 
 # TCP poses relative to the shoulder (joint2), body frame.
-STOW_REL = np.array([0.30, 0.0, 0.02])     # folded, gripper forward over the head
+STOW_REL = np.array([0.33, 0.0, 0.0])      # folded, gripper forward over the head
 CARRY_REL = np.array([0.40, 0.0, 0.05])
 R_STOW = np.eye(3)                          # approach axis forward, horizontal
 R_DEFAULT = geo.rot_pitch(math.radians(-30.0))   # carry: 30 deg down
@@ -113,7 +113,7 @@ class KinBackend:
     self.posture_tau = float(base.get('posture_tau', 0.4))
     self.foot_half = tuple(0.5 * float(x) for x in base.get('footprint', (0.82, 0.44)))
     arm = cfg.get('arm', {})
-    mount = np.asarray(arm.get('mount_xyz', (0.10, 0.0, 0.13)), np.float64)
+    mount = np.asarray(arm.get('mount_xyz', (0.03, 0.0, 0.095)), np.float64)
     self.shoulder_b = mount + [0.0, 0.0, float(arm.get('shoulder_z', SHOULDER_Z))]
     self.L1 = float(arm.get('upper', UPPER))
     self.L2 = float(arm.get('fore', FORE))

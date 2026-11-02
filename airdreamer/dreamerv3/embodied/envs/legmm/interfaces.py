@@ -42,10 +42,10 @@ NUM_SKILLS = len(Skill)
 # 布局：name -> (slice, low_phys, high_phys)，策略输出 [-1,1] 线性映射到物理量
 # Body height command: base_link origin height above ground. Range = belly on
 # the ground (base mesh bottom is 0.078 m below the origin, unitree_a2/xmls/a2.xml)
-# up to the default standing pose (thigh 0.9, calf -1.8, 0.275 m links, 0.032 m
-# foot radius -> 0.374 m; unitree_rl_mjlab a2_constants.INIT_STATE).
+# up to the standing height of the trained UniLab A2JoystickFlat policy at zero
+# velocity command: 0.385 m (16 envs x 10 s, docs/legmm/m1_a2_stand_height.json).
 # Pitch is not commanded (user decision 2026-11-02).
-BASE_HEIGHT_RANGE = (0.08, 0.374)
+BASE_HEIGHT_RANGE = (0.08, 0.385)
 
 NAV_LAYOUT = {
     'vx':        (slice(0, 1), -0.8, 0.8),     # m/s

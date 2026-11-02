@@ -1,0 +1,13 @@
+{
+ "n_envs": 16,
+ "seconds": 10.0,
+ "ctrl_dt": 0.02,
+ "max_abs_command": 0.0,
+ "falls": 0,
+ "base_height_mean": 0.3852890729904175,
+ "base_height_std_over_time": 1.8659948182175867e-05,
+ "base_height_env_min": 0.3838918209075928,
+ "base_height_env_max": 0.3866596519947052,
+ "base_height_first_step": 0.38576167821884155,
+ "reward_base_height_target": 0.4
+}
