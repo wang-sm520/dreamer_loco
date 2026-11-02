@@ -21,6 +21,40 @@ concat = lambda xs, a: jax.tree.map(lambda *x: jnp.concatenate(x, a), *xs)
 isimage = lambda s: s.dtype == np.uint8 and len(s.shape) == 3
 
 
+def anneal_scale(step, scale, scale_end, anneal_steps):
+  """Linearly interpolate a loss coefficient and clamp after the schedule."""
+  if isinstance(step, (int, float, np.integer, np.floating)):
+    frac = min(max(float(step) / max(float(anneal_steps), 1.0), 0.0), 1.0)
+    return float(scale) + frac * (float(scale_end) - float(scale))
+  steps = jnp.maximum(f32(anneal_steps), 1.0)
+  frac = jnp.clip(f32(step) / steps, 0.0, 1.0)
+  return f32(scale) + frac * (f32(scale_end) - f32(scale))
+
+
+def bc_action_targets(prevact):
+  """Return actions executed at obs[t], plus a final unpaired position.
+
+  Replay context stores the action arriving before each observation in
+  ``prevact[t]``; consequently the action recorded with obs[t] is
+  ``prevact[t+1]``.  The returned tree is sliced to T-1 and loss code pads
+  its final scalar entry with zero.
+  """
+  return jax.tree.map(lambda x: x[:, 1:], prevact)
+
+
+def bc_policy_input(repinp):
+  """Features paired with actions at obs[t], excluding the final pad slot."""
+  return sg(repinp[:, :-1])
+
+
+def soft_bce_logits(logits, labels):
+  """Stable BCE for soft labels, including logits with magnitude 30+."""
+  if isinstance(logits, np.ndarray):
+    return np.maximum(logits, 0) - logits * labels + np.log1p(np.exp(-np.abs(logits)))
+  logits, labels = f32(logits), f32(labels)
+  return jnp.maximum(logits, jnp.zeros_like(logits)) - logits * labels + jax.nn.softplus(-jnp.abs(logits))
+
+
 class Agent(embodied.jax.Agent):
 
   banner = [
@@ -57,6 +91,17 @@ class Agent(embodied.jax.Agent):
     self.feat2tensor = lambda x: jnp.concatenate([
         nn.cast(x['deter']),
         nn.cast(x['stoch'].reshape((*x['stoch'].shape[:-2], -1)))], -1)
+
+    self.train_phase = config.train_phase
+    self._imag_enabled = bool(config.imag_enabled) and self.train_phase not in ('wm', 'bc')
+    bc_cfg = config.bc
+    self._bc_enabled = bool(config.skill.enabled) and self.train_phase in ('bc', 'rl', 'online') and (
+        float(bc_cfg.scale) != 0.0 or float(bc_cfg.scale_end) != 0.0)
+    prior_cfg = config.skill_prior
+    self._schedule_enabled = self._bc_enabled or (
+        float(prior_cfg.scale) != 0.0 or float(prior_cfg.scale_end) != 0.0)
+    self.step = (nj.Variable(jnp.array, 0, i32, name='agent_step')
+                 if self._schedule_enabled else None)
     
     #构建reward、continue head
     scalar = elements.Space(np.float32, ())
@@ -82,8 +127,34 @@ class Agent(embodied.jax.Agent):
     self.valnorm = embodied.jax.Normalize(**config.valnorm, name='valnorm')
     self.advnorm = embodied.jax.Normalize(**config.advnorm, name='advnorm')
 
+    # The affordance head emits two unconstrained logits. The masked BCE below
+    # is computed directly from those logits so soft labels are supported.
+    self.aff = None
+    if config.aff_head.enabled:
+      kw = dict(config.aff_head)
+      kw.pop('enabled', None)
+      aff_scale = kw.pop('scale', 1.0)
+      self.aff_scale = float(aff_scale)
+      aff_space = elements.Space(np.int32, (2,), 0, 2)
+      self.aff = embodied.jax.MLPHead(
+          aff_space, output='binary', **kw, name='aff')
+
+    self.phase = None
+    if config.phase_head.enabled:
+      kw = dict(config.phase_head)
+      kw.pop('enabled', None)
+      phase_scale = kw.pop('scale', 1.0)
+      self.phase_scale = float(phase_scale)
+      phase_space = elements.Space(np.int32, (), 0, 3)
+      self.phase = embodied.jax.MLPHead(
+          phase_space, output='categorical', **kw, name='phase')
+
     self.modules = [
         self.dyn, self.enc, self.dec, self.rew, self.con, self.pol, self.val]
+    if self.aff is not None:
+      self.modules.append(self.aff)
+    if self.phase is not None:
+      self.modules.append(self.phase)
     #定义了强化学习模型的优化器（Optimizer），用于训练模型的所有可训练参数
     self.opt = embodied.jax.Optimizer(
         self.modules, self._make_opt(**config.opt), summary_depth=1,
@@ -99,11 +170,38 @@ class Agent(embodied.jax.Agent):
           for item in config.rec_scales.split(',') if item.strip()
           for key, value in [item.split('=', 1)]}
     scales.update({k: overrides.get(k, rec) for k in dec_space})
+    # The table of enabled losses is built once and is checked at the end of
+    # loss().  In wm/bc phases imagination is skipped, so policy/value/repval
+    # are absent from both dictionaries.  BC is enabled only when its
+    # annealed coefficient can be non-zero; this leaves drone defaults exact.
+    if not self._imag_enabled:
+      for key in ('policy', 'value', 'repval'):
+        scales.pop(key, None)
+    elif not config.repval_loss:
+      scales.pop('repval', None)
+    if self.aff is not None:
+      scales['aff'] = self.aff_scale
+    if self.phase is not None:
+      scales['phase'] = self.phase_scale
+    if self._bc_enabled:
+      scales['bc'] = 1.0
     self.scales = scales
 
   @property
   def policy_keys(self):
     return '^(enc|dyn|dec|pol)/'
+
+  def bc_scale(self, step=None):
+    step = self.step.read() if step is None and self.step is not None else (0 if step is None else step)
+    return anneal_scale(
+        step, self.config.bc.scale, self.config.bc.scale_end,
+        self.config.bc.anneal_steps)
+
+  def prior_scale(self, step=None):
+    step = self.step.read() if step is None and self.step is not None else (0 if step is None else step)
+    return anneal_scale(
+        step, self.config.skill_prior.scale, self.config.skill_prior.scale_end,
+        self.config.skill_prior.anneal_steps)
 
   def mask_inactive(self, act):
     if not self.config.skill.enabled:
@@ -170,6 +268,8 @@ class Agent(embodied.jax.Agent):
         self.loss, carry, obs, prevact, training=True, has_aux=True)
     metrics.update(mets)
     self.slowval.update()
+    if self.step is not None and not nj.creating():
+      self.step.write(self.step.read() + i32(1))
     outs = {}
     if self.config.replay_context:
       updates = elements.tree.flatdict(dict(
@@ -189,6 +289,12 @@ class Agent(embodied.jax.Agent):
     B, T = reset.shape
     losses = {}
     metrics = {}
+
+    # Replay stores one value for every action head. For skill-conditioned
+    # data, the RSSM receives inactive heads masked to zero. BC keeps the raw
+    # stored action so its skill selector can ignore inactive heads explicitly.
+    bc_prevact = prevact
+    prevact = self.mask_inactive(prevact)
 
     # World model
     enc_carry, enc_entries, tokens = self.enc(
@@ -214,59 +320,112 @@ class Agent(embodied.jax.Agent):
         loss /= space.shape[0] * space.shape[1]
       losses[key] = loss
 
+    # World-model auxiliary supervision.  The returned affordance tensor is
+    # constant over (B,T), with value equal to the global masked mean.  Thus
+    # the optimizer's ordinary batch mean is exactly
+    # sum(mask * BCE) / max(sum(mask), 1), while retaining the required (B,T)
+    # loss shape shared by every other loss term.
+    repinp = self.feat2tensor(repfeat)
+    if self.aff is not None:
+      aff_logits = self.aff(repinp, 2).output.logit
+      labels = f32(obs['label_aff'])
+      mask = f32(obs['label_aff_mask'])
+      bce = soft_bce_logits(aff_logits, labels)
+      denom = jnp.maximum(mask.sum(), 1.0)
+      aff_mean = (mask * bce).sum() / denom
+      losses['aff'] = jnp.ones((B, T), f32) * aff_mean
+      correct = (jax.nn.sigmoid(aff_logits) >= 0.5) == (labels >= 0.5)
+      metrics['aff_acc'] = (f32(correct) * mask).sum() / denom
+    if self.phase is not None:
+      phase_out = self.phase(repinp, 2)
+      losses['phase'] = phase_out.loss(obs['label_phase'])
+      metrics['phase_acc'] = f32(
+          phase_out.pred() == obs['label_phase']).mean()
+
+    if self._bc_enabled:
+      # _apply_replay_context makes prevact[t+1] the action stored alongside
+      # obs[t].  We therefore compare policy outputs at t=0..T-2 with
+      # prevact[:,1:] and pad the final (unpaired) position with zero.
+      # Evaluate the policy on the paired feature prefix.  MLPHead returns
+      # Output objects (rather than arrays), so slicing the input sequence is
+      # the equivalent of slicing each distribution in P to [:, :-1].
+      pol = self.pol(bc_policy_input(repinp), 2)
+      target = bc_action_targets(bc_prevact)
+      skill = target[self.config.skill.key]
+      lp = pol[self.config.skill.key].logp(skill)
+      for i, key in enumerate(self.config.skill.action_keys):
+        lp += (skill == i) * pol[key].logp(target[key])
+      bc = -lp * self.bc_scale()
+      # Dataset writers store a zero action on terminal observations.  That
+      # action is a reset sentinel, so terminal obs[t] must contribute zero to
+      # BC even though it is present at prevact[t+1].
+      bc *= 1.0 - f32(obs['is_last'][:, :-1])
+      losses['bc'] = jnp.concatenate([bc, jnp.zeros((B, 1), f32)], 1)
+      metrics['bc_scale'] = self.bc_scale()
+
+    if not self._imag_enabled:
+      # Optimizer modules are still constructed so their parameter trees stay
+      # stable. Touch policy/value once to register their parameters, but do
+      # not imagine or include any actor-critic loss in wm/bc phases; their
+      # resulting gradients are exactly zero.
+      self.pol(sg(repinp), 2)
+      self.val(repinp, 2)
+      self.slowval(repinp, 2)
+
     B, T = reset.shape
     shapes = {k: v.shape for k, v in losses.items()}
     assert all(x == (B, T) for x in shapes.values()), ((B, T), shapes)
 
-    # Imagination
-    K = min(self.config.imag_last or T, T)
-    H = self.config.imag_length
-    starts = self.dyn.starts(dyn_entries, dyn_carry, K)
-    policyfn = lambda feat: self.mask_inactive(
-        sample(self.pol(self.feat2tensor(feat), 1)))
-    _, imgfeat, imgprevact = self.dyn.imagine(starts, policyfn, H, training)
-    first = jax.tree.map(
-        lambda x: x[:, -K:].reshape((B * K, 1, *x.shape[2:])), repfeat)
-    imgfeat = concat([sg(first, skip=self.config.ac_grads), sg(imgfeat)], 1)
-    lastact = policyfn(jax.tree.map(lambda x: x[:, -1], imgfeat))
-    lastact = jax.tree.map(lambda x: x[:, None], lastact)
-    imgact = concat([imgprevact, lastact], 1)
-    assert all(x.shape[:2] == (B * K, H + 1) for x in jax.tree.leaves(imgfeat))
-    assert all(x.shape[:2] == (B * K, H + 1) for x in jax.tree.leaves(imgact))
-    inp = self.feat2tensor(imgfeat)
-    los, imgloss_out, mets = imag_loss(
-        imgact,
-        self.rew(inp, 2).pred(),
-        self.con(inp, 2).prob(1),
-        self.pol(inp, 2),
-        self.val(inp, 2),
-        self.slowval(inp, 2),
-        self.retnorm, self.valnorm, self.advnorm,
-        update=training,
-        contdisc=self.config.contdisc,
-        horizon=self.config.horizon,
-        **self.config.imag_loss)
-    losses.update({k: v.mean(1).reshape((B, K)) for k, v in los.items()})
-    metrics.update(mets)
-
-    # Replay
-    if self.config.repval_loss:
-      feat = sg(repfeat, skip=self.config.repval_grad)
-      last, term, rew = [obs[k] for k in ('is_last', 'is_terminal', 'reward')]
-      boot = imgloss_out['ret'][:, 0].reshape(B, K)
-      feat, last, term, rew, boot = jax.tree.map(
-          lambda x: x[:, -K:], (feat, last, term, rew, boot))
-      inp = self.feat2tensor(feat)
-      los, reploss_out, mets = repl_loss(
-          last, term, rew, boot,
+    imgloss_out = None
+    if self._imag_enabled:
+      K = min(self.config.imag_last or T, T)
+      H = self.config.imag_length
+      starts = self.dyn.starts(dyn_entries, dyn_carry, K)
+      policyfn = lambda feat: self.mask_inactive(
+          sample(self.pol(self.feat2tensor(feat), 1)))
+      _, imgfeat, imgprevact = self.dyn.imagine(starts, policyfn, H, training)
+      first = jax.tree.map(
+          lambda x: x[:, -K:].reshape((B * K, 1, *x.shape[2:])), repfeat)
+      imgfeat = concat([sg(first, skip=self.config.ac_grads), sg(imgfeat)], 1)
+      lastact = policyfn(jax.tree.map(lambda x: x[:, -1], imgfeat))
+      lastact = jax.tree.map(lambda x: x[:, None], lastact)
+      imgact = concat([imgprevact, lastact], 1)
+      assert all(x.shape[:2] == (B * K, H + 1) for x in jax.tree.leaves(imgfeat))
+      assert all(x.shape[:2] == (B * K, H + 1) for x in jax.tree.leaves(imgact))
+      inp = self.feat2tensor(imgfeat)
+      los, imgloss_out, mets = imag_loss(
+          imgact,
+          self.rew(inp, 2).pred(),
+          self.con(inp, 2).prob(1),
+          self.pol(inp, 2),
           self.val(inp, 2),
           self.slowval(inp, 2),
-          self.valnorm,
+          self.retnorm, self.valnorm, self.advnorm,
           update=training,
+          contdisc=self.config.contdisc,
           horizon=self.config.horizon,
-          **self.config.repl_loss)
-      losses.update(los)
-      metrics.update(prefix(mets, 'reploss'))
+          **self.config.imag_loss)
+      losses.update({k: v.mean(1).reshape((B, K)) for k, v in los.items()})
+      metrics.update(mets)
+
+      # Replay value loss is meaningful only when imagination ran.
+      if self.config.repval_loss:
+        feat = sg(repfeat, skip=self.config.repval_grad)
+        last, term, rew = [obs[k] for k in ('is_last', 'is_terminal', 'reward')]
+        boot = imgloss_out['ret'][:, 0].reshape(B, K)
+        feat, last, term, rew, boot = jax.tree.map(
+            lambda x: x[:, -K:], (feat, last, term, rew, boot))
+        inp = self.feat2tensor(feat)
+        los, reploss_out, mets = repl_loss(
+            last, term, rew, boot,
+            self.val(inp, 2),
+            self.slowval(inp, 2),
+            self.valnorm,
+            update=training,
+            horizon=self.config.horizon,
+            **self.config.repl_loss)
+        losses.update(los)
+        metrics.update(prefix(mets, 'reploss'))
 
     assert set(losses.keys()) == set(self.scales.keys()), (
         sorted(losses.keys()), sorted(self.scales.keys()))

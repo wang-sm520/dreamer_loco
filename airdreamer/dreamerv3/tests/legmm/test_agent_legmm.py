@@ -8,13 +8,14 @@ from dreamerv3.agent import Agent
 
 
 def make_legmm_agent(rec_scales=None, skill_enabled=None,
-                     rec_per_pixel_norm=True):
+                     rec_per_pixel_norm=True, train_phase=None, bc=None,
+                     batch_length=3):
   config = load_config(['legmm', 'sizetest'], [
       '--jax.platform=cpu',
-      '--jax.policy_devices=0', '--jax.train_devices=0'])
+      '--jax.policy_devices=0', '--jax.train_devices=0', '--jax.jit=False'])
   config = config.update({'agent': {
       'rec_per_pixel_norm': rec_per_pixel_norm},
-      'batch_size': 2, 'batch_length': 3})
+      'batch_size': 2, 'batch_length': batch_length})
   obs = {k: v for k, v in interfaces.make_obs_space().items()
          if not k.startswith('log/')}
   act = {k: v for k, v in interfaces.make_act_space().items() if k != 'reset'}
@@ -22,6 +23,10 @@ def make_legmm_agent(rec_scales=None, skill_enabled=None,
     config = config.update({'agent': {'rec_scales': rec_scales}})
   if skill_enabled is not None:
     config = config.update({'agent': {'skill': {'enabled': skill_enabled}}})
+  if train_phase is not None:
+    config = config.update({'agent': {'train_phase': train_phase}})
+  if bc is not None:
+    config = config.update({'agent': {'bc': bc}})
   cfg = elements.Config(
       **config.agent, logdir='/tmp/legmm-agent-tests', seed=config.seed,
       jax=dict(config.jax, precompile=False), batch_size=config.batch_size,
@@ -54,7 +59,10 @@ def _reconstruction_losses(agent, batch):
   carry = agent.init_train(2)
   batch = jax.tree.map(jax.device_put, batch)
   agent.train(carry, dict(batch))
-  _, _, metrics = agent.train(carry, dict(batch))
+  # The first public train() returns before its async metrics are fetched.
+  # Fetch that first loss call explicitly; do not perform a second optimizer update.
+  metrics = agent._take_outs(agent.pending_mets)
+  agent.pending_mets = None
   return {key: metrics[f'loss/{key}'] for key in
           ('depth_head', 'depth_wrist', 'proprio', 'goal')}
 
