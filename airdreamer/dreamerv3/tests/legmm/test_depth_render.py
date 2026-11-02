@@ -51,7 +51,8 @@ def test_min_z_is_invalid():
   cfg = env_cfg()
   cfg['camera_head'] = dict(cfg['camera_head'], mount_pitch_deg=0.0, mount_xyz=(0.30, 0.0, 0.10))
   b = kin_backend.KinBackend(cfg)
-  b.reset(wall_scene(0.30 + 0.20), np.random.default_rng(0))   # 0.20 m < min_z 0.28
+  min_z = cfg['camera_head']['min_z']
+  b.reset(wall_scene(0.30 + min_z - 0.05), np.random.default_rng(0))   # closer than min_z
   q = b.render('head', noise=False)
   assert np.all(q[I.DEPTH_H // 2, :, 0] == 0)
 

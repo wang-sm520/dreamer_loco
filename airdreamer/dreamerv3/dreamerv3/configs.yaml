@@ -300,7 +300,7 @@ defaults:
       max_failed_grasps: 3
       # Head D435i at the A2's original front camera: lens module center in the
       # base_link mesh at (0.345, 0, 0.08), facing forward (unitree_a2/xmls/assets/base_link.STL).
-      camera_head:  {model: d435i, min_z: 0.28, max_z: 6.0, mount_xyz: [0.35, 0.0, 0.08], mount_pitch_deg: 0.0}  # user: 1920 (that is the RGB stream; the D435i depth stream maxes at 1280x720, min_z ~0.28 m)
+      camera_head:  {model: d435i, min_z: 0.195, max_z: 6.0, mount_xyz: [0.35, 0.0, 0.08], mount_pitch_deg: 0.0}  # depth stream 848x480 (Intel's recommended D435i depth mode; user asked to lower it from 1280x720): min_z ~0.195 m (datasheet), TODO(calibrate) measure
       # Wrist RealSense D405 on the AIRBOT camera stand, in the TCP frame (x = approach
       # axis, z = stand side), from depth-mani/airbot_rl/assets/meshes/airbot_play/camera_stand.obj:
       # 0.127 m behind the TCP, 0.112 m off-axis, tilted 31.6 deg towards the gripper axis.
