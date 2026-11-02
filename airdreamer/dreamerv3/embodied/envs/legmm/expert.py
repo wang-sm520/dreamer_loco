@@ -393,7 +393,7 @@ class ManipController:
         self.why = 'pre_timeout'
         return None, 'failed'
     elif sub == 'goal':
-      if err < (0.008 if p.kind == 'place' else 0.012):
+      if err < (0.008 if p.kind == 'place' and self.t < 6 else 0.012):
         self._advance()
       elif self.t > self.limit + 4:
         self.why = 'goal_timeout'
@@ -680,7 +680,8 @@ class ScriptedExpert:
       d = p.base[:2] - pos
       fx, fy = c * d[0] + sn * d[1], -sn * d[0] + c * d[1]
       err = planning.wrap(p.base[2] - s.yaw)
-      if math.hypot(fx, fy) < 0.03 and abs(err) < 0.06:
+      # Loose tolerance: the manipulation controller keeps correcting the base.
+      if math.hypot(fx, fy) < 0.05 and abs(err) < 0.1:
         return self._start_manip()
       if self.timer > 80:
         self.stats['fail_line_timeout'] += 1

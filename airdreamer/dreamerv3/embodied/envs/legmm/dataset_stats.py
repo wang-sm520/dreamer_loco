@@ -23,6 +23,15 @@ def load_meta(out):
   return side, episodes
 
 
+def task_failure(e):
+  """Episode ends in failure or contains a failed manipulation attempt
+  (failed grasp, pick/place controller failure). Navigation retries of the
+  expert (stuck, alignment timeouts) do not count."""
+  manip = sum(v for k, v in e.items()
+              if k.startswith(('expert_fail_pick_', 'expert_fail_place_', 'fail_pick_', 'fail_place_')))
+  return (not e['success']) or e.get('failed_grasps', 0) > 0 or manip > 0
+
+
 def summarize(out, figs=True):
   out = pathlib.Path(out)
   side, eps = load_meta(out)
@@ -30,8 +39,7 @@ def summarize(out, figs=True):
   n = len(side['sample_id'])
   skills = np.bincount(side['skill'], minlength=3) / max(n, 1)
   succ = np.array([e['success'] for e in eps])
-  with_failure = np.array([(not e['success']) or e['failed_grasps'] > 0 or e['expert_failures'] > 0
-                           for e in eps])
+  with_failure = np.array([task_failure(e) for e in eps])
   per_type = {}
   for t in sorted({e['scene_type'] for e in eps}):
     es = [e for e in eps if e['scene_type'] == t]
@@ -54,6 +62,7 @@ def summarize(out, figs=True):
       skill_frac=dict(zip(('NAV', 'PICK', 'PLACE'), skills.round(4).tolist())),
       success=float(succ.mean()) if len(eps) else float('nan'),
       episodes_with_failure=float(with_failure.mean()) if len(eps) else float('nan'),
+      episodes_ending_in_failure=float(1 - succ.mean()) if len(eps) else float('nan'),
       term_reasons=dict(collections.Counter(e['term_reason'] for e in eps)),
       per_scene_type=per_type, labels=labels,
       explore_frac=float(side['explore'].mean()), dart_episode_frac=float(np.mean([e['dart'] for e in eps])),
