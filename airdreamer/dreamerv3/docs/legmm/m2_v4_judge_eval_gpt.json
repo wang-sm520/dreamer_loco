@@ -1,0 +1,1741 @@
+{
+ "summary": {
+  "n": 40,
+  "oracle_positive_frac": 0.4,
+  "stored_label_agrees_with_oracle": 0.9,
+  "labeler_rerun_agrees_with_oracle": 0.875,
+  "labeler_h45_agrees_with_oracle": 0.9,
+  "labeler_h60_agrees_with_oracle": 0.9,
+  "aff_geom_agrees_with_oracle": 0.175,
+  "rule_judge": {
+   "decided": 37,
+   "uncertain": 3,
+   "accuracy_vs_oracle": 0.5405405405405406,
+   "says_feasible_frac": 0.1891891891891892
+  },
+  "gpt_v1": {
+   "decided": 39,
+   "uncertain": 1,
+   "accuracy_vs_oracle": 0.4358974358974359,
+   "says_feasible_frac": 0.9743589743589743,
+   "would_reject": 17,
+   "rejections_correct": 2
+  },
+  "gpt_v2": {
+   "decided": 38,
+   "uncertain": 2,
+   "accuracy_vs_oracle": 0.5789473684210527,
+   "says_feasible_frac": 0.21052631578947367,
+   "would_reject": 16,
+   "rejections_correct": 2
+  }
+ },
+ "rows": [
+  {
+   "sample_id": 1530,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 107,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": 78.1,
+    "shoulder_to_object_xy_m": 0.682,
+    "object_height_m": 0.75,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     13,
+     -167
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.67,
+    "reason": "The object is within the arm's approximate reach and appears visible, but nearby obstacles constrain approach directions; small base adjustment may allow a side approach.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "uncertain",
+    "confidence": 0.84,
+    "reason": "Object bearing is 78\u00b0; even the allowed 17\u00b0 turn leaves it just outside the \u00b160\u00b0 working sector, and the nearest free approach (13\u00b0) is about 65\u00b0 away. With a nearby table and blocked top-down approach, this is borderline.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 9019,
+   "label": 0.5,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 1.0,
+   "weak_h45": 1.0,
+   "weak_h60": 1.0,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 28,
+    "tried": 3
+   },
+   "features": {
+    "bearing_deg": 7.0,
+    "shoulder_to_object_xy_m": 0.687,
+    "object_height_m": 0.063,
+    "body_height_m": 0.223,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     13,
+     -167
+    ],
+    "furniture_within_0_3m": [
+     "obstacle"
+    ]
+   },
+   "rule": "feasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is about 0.72 m from the base, within the arm's roughly 0.8 m reach, and lies in an open area with several free approach directions. Small base adjustment should provide a viable grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "feasible",
+    "confidence": 0.83,
+    "reason": "Object is nearly straight ahead (bearing 7\u00b0), within reach, and a clear approach direction at 13\u00b0 aligns with it; small base adjustment suffices despite a nearby obstacle.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 11110,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 29,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": -0.0,
+    "shoulder_to_object_xy_m": 0.67,
+    "object_height_m": 0.694,
+    "body_height_m": 0.355,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -45,
+     135
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "feasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.72,
+    "reason": "The object is within the arm's approximate reach and has at least a couple of clear approach directions from the robot's front-left side; nearby obstacles block some sides but small base adjustments should allow a grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "Target is straight ahead, within reach, and the -45\u00b0 free approach lies within the robot's \u00b160\u00b0 forward workspace; the nearby table does not eliminate that listed approach.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 18286,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 167,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": 91.4,
+    "shoulder_to_object_xy_m": 0.69,
+    "object_height_m": 0.679,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     32,
+     -148
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.87,
+    "reason": "The object is about 0.69 m from the base, within the arm's roughly 0.8 m reach, and lies in an open approach direction beside the nearby table. A small yaw/base adjustment should align the side reach without re-navigation.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.98,
+    "reason": "Object bearing is 91.4\u00b0, and the allowed \u00b117\u00b0 base turn still leaves it at about 74\u00b0, outside the arm's \u00b160\u00b0 forward working sector.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 18394,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 152,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": 79.5,
+    "shoulder_to_object_xy_m": 0.663,
+    "object_height_m": 0.679,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     28,
+     -152
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.87,
+    "reason": "The object is about 0.67 m from the base, within the arm's roughly 0.8 m reach, and the top-down sketch shows a clear approach direction toward it with no intervening wall or obstacle.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.95,
+    "reason": "Object bearing is 79.5\u00b0, and the allowed 17\u00b0 turn only reduces this to about 62.5\u00b0, still outside the robot's roughly \u00b160\u00b0 forward workspace. The top-down approach is also blocked by nearby furniture.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 1099511635757,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 0,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": -161.3,
+    "shoulder_to_object_xy_m": 0.768,
+    "object_height_m": 0.571,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     172,
+     -143,
+     -98,
+     -53,
+     -8,
+     37,
+     82,
+     127
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is within the arm's roughly 0.8 m reach behind the robot, with a clear approach direction and no significant obstacle blocking the illustrated grasp path; small base adjustments should suffice.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "The object bearing is -161.3\u00b0, far outside the arm's roughly \u00b160\u00b0 forward workspace; the allowed \u00b117\u00b0 base turn cannot bring it into reach.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 1099511639415,
+   "label": 1.0,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 1.0,
+   "weak_h45": 1.0,
+   "weak_h60": 1.0,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 4,
+    "tried": 1
+   },
+   "features": {
+    "bearing_deg": 35.4,
+    "shoulder_to_object_xy_m": 0.92,
+    "object_height_m": 0.061,
+    "body_height_m": 0.351,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     158,
+     -22
+    ],
+    "furniture_within_0_3m": [
+     "obstacle"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.72,
+    "reason": "The object is about 0.95 m from the base, but a small forward adjustment can bring it near the arm's roughly 0.8 m reach. It is approachable from the robot side, with no clear blocking obstacle in the depth views.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "reach_ok is false and no free approach direction lies within the arm's reachable forward sector; the nearby obstacle also blocks access.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 1099511645741,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 39,
+    "tried": 1
+   },
+   "features": {
+    "bearing_deg": -121.2,
+    "shoulder_to_object_xy_m": 0.734,
+    "object_height_m": 0.075,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -161,
+     19
+    ],
+    "furniture_within_0_3m": [
+     "obstacle"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.69,
+    "reason": "The object is about 0.72 m from the base, within the arm's roughly 0.8 m reach, and there is no nearby obstacle blocking the workspace; small base adjustment should align the gripper.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.98,
+    "reason": "Object bearing is -121.2\u00b0, far outside the arm's \u00b160\u00b0 front workspace; the allowed \u00b117\u00b0 base turn cannot bring it into reach, despite reach_ok being true.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 3298534888966,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 318,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 130.9,
+    "shoulder_to_object_xy_m": 0.487,
+    "object_height_m": 0.07,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     32,
+     -148
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is about 0.47 m from the base, within the arm's roughly 0.8 m reach, with clear nearby approach space and no blocking obstacle. Its position near the robot's rear-mounted arm is accessible with small adjustments.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is 130.9\u00b0 from the robot, well outside the arm's \u00b160\u00b0 forward workspace even after the allowed \u00b117\u00b0 base turn; top-down free approach is also false.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 3298534889018,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 59,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 2.7,
+    "shoulder_to_object_xy_m": 0.736,
+    "object_height_m": 0.07,
+    "body_height_m": 0.275,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     15,
+     -165
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "feasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is about 0.77 m directly ahead of the robot, within the arm's reach and aligned with its heading. No nearby obstacle blocks the approach, and small base adjustment should make the low-floor grasp reachable.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "feasible",
+    "confidence": 0.96,
+    "reason": "Object is 2.7\u00b0 ahead and within 0.736 m reach; reach_ok is true, and the free 15\u00b0 approach lies within the arm's \u00b160\u00b0 forward workspace.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 4398046536970,
+   "label": 1.0,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 0.5,
+   "weak_h45": 0.5,
+   "weak_h60": 0.5,
+   "oracle": 0.5,
+   "oracle_info": {
+    "plans": 41,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": 69.3,
+    "shoulder_to_object_xy_m": 0.669,
+    "object_height_m": 0.485,
+    "body_height_m": 0.385,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -97,
+     83
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is about 0.68 m from the base, within the arm's roughly 0.8 m reach, with clear approach directions and no nearby blocking obstacles; small base adjustment should suffice.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "reach_ok is false, and the object's 69.3\u00b0 bearing is outside the arm's roughly \u00b160\u00b0 forward workspace; top-down approach is also blocked.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 5497558143110,
+   "label": 1.0,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 1.0,
+   "weak_h45": 1.0,
+   "weak_h60": 1.0,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 28,
+    "tried": 1
+   },
+   "features": {
+    "bearing_deg": 0.8,
+    "shoulder_to_object_xy_m": 0.86,
+    "object_height_m": 0.069,
+    "body_height_m": 0.089,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -152,
+     28
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is directly ahead at about 0.89 m, but a small forward base adjustment can bring it within the arm's roughly 0.8 m reach. The nearby approach directions are open and no obstacle blocks the grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "reach_ok is false and top_down_free is false, so the arm cannot reach the object along a free approach from this base pose.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 5497558154528,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 37,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 106.3,
+    "shoulder_to_object_xy_m": 0.769,
+    "object_height_m": 0.067,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -160,
+     20
+    ],
+    "furniture_within_0_3m": [
+     "obstacle"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is about 0.76 m from the base, within the arm's roughly 0.8 m reach, and lies along a marked free approach direction. Small translation and yaw adjustments should provide a workable grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is 106.3\u00b0, remaining outside the arm's \u00b160\u00b0 forward workspace even after the allowed \u00b117\u00b0 base turn; top-down approach is also blocked.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 5497558154628,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 37,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 106.3,
+    "shoulder_to_object_xy_m": 0.769,
+    "object_height_m": 0.067,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -160,
+     20
+    ],
+    "furniture_within_0_3m": [
+     "obstacle"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.82,
+    "reason": "The object is about 0.76 m from the base and appears reachable with the arm's roughly 0.8 m maximum reach; free approach directions and small repositioning provide access despite nearby obstacles.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is 106.3\u00b0, and the allowed \u00b117\u00b0 base turn cannot bring it within the arm's \u00b160\u00b0 forward workspace. No free approach direction aligns either; top-down approach is blocked.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 7696581400519,
+   "label": 1.0,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 1.0,
+   "weak_h45": 1.0,
+   "weak_h60": 1.0,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 74,
+    "tried": 1
+   },
+   "features": {
+    "bearing_deg": -47.5,
+    "shoulder_to_object_xy_m": 0.874,
+    "object_height_m": 0.078,
+    "body_height_m": 0.124,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     74,
+     119,
+     164,
+     -151,
+     -106,
+     -61,
+     -16,
+     29
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.88,
+    "reason": "Object is about 0.89 m ahead of the base, with clear approach directions (8/9 free). A small forward adjustment can bring it within the arm's roughly 0.8 m reach, and the top-down view shows no blocking obstacle.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 1.0,
+    "reason": "reach_ok is false, so the arm cannot reach the object from this base pose even with allowed small adjustments.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 7696581414702,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 17,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 75.3,
+    "shoulder_to_object_xy_m": 0.881,
+    "object_height_m": 0.596,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     169,
+     -11
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "uncertain",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is about 0.88 m from the base, but a small forward adjustment can bring it within the arm\u2019s roughly 0.8 m reach. Its height is near the shoulder height, and the top-down sketch shows free approach directions despite side obstruction.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.98,
+    "reason": "Infeasible: the object bearing is 75.3\u00b0 and the only free approach directions (169\u00b0 and \u221211\u00b0) are not aligned within about \u00b160\u00b0; top_down_free is also false, indicating the table blocks the grasp approach.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 9895604656161,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 0,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": -173.8,
+    "shoulder_to_object_xy_m": 0.838,
+    "object_height_m": 0.688,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -167,
+     13
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.82,
+    "reason": "The object is within the arm's reachable range after a small forward base adjustment, and the open scene provides a clear side approach around the table.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is -173.8\u00b0, nearly directly behind the robot; even the allowed \u00b117\u00b0 turn leaves it far outside the arm's \u00b160\u00b0 forward workspace. The available approach at -167\u00b0 is likewise behind.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 9895604665988,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 205,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": -129.7,
+    "shoulder_to_object_xy_m": 0.613,
+    "object_height_m": 0.693,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     9,
+     54,
+     99,
+     144,
+     -171,
+     -126,
+     -81,
+     -36
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is about 0.59 m from the base, within the arm's roughly 0.8 m reach, with clear approach directions and no intervening obstacle visible. Small base adjustments should allow a grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is -129.7\u00b0, far outside the arm's \u00b160\u00b0 forward workspace even after the allowed small turn; top_down_free is also false.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 9895604666666,
+   "label": 0.75,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 0.75,
+   "weak_h45": 0.75,
+   "weak_h60": 0.75,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 18,
+    "tried": 2
+   },
+   "features": {
+    "bearing_deg": -15.3,
+    "shoulder_to_object_xy_m": 0.834,
+    "object_height_m": 0.063,
+    "body_height_m": 0.152,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -137,
+     43
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is unobstructed and about 0.86 m from the base, within the arm's reach after a small forward adjustment; a free approach direction is available.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "reach_ok is false, and no free approach direction lies within the required forward sector.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 10995116289255,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 123,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": -82.2,
+    "shoulder_to_object_xy_m": 0.785,
+    "object_height_m": 0.808,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -108,
+     -63,
+     -18,
+     27,
+     72,
+     117,
+     162,
+     -153
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is nearly directly behind the robot, within about 0.8 m horizontal reach, and the allowed small base adjustment can bring it comfortably into the arm workspace. Approach directions are mostly free and the depth views show no clear blocking obstacle.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.9,
+    "reason": "The object is at a -82.2\u00b0 bearing; the maximum allowed +17\u00b0 turn still leaves it about -65\u00b0, outside the arm's roughly \u00b160\u00b0 forward workspace. The top-down approach is also blocked and a table is within 0.3 m.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 10995116289794,
+   "label": 1.0,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 0.75,
+   "weak_h45": 0.75,
+   "weak_h60": 0.75,
+   "oracle": 0.5,
+   "oracle_info": {
+    "plans": 4,
+    "tried": 1
+   },
+   "features": {
+    "bearing_deg": -5.9,
+    "shoulder_to_object_xy_m": 0.809,
+    "object_height_m": 0.505,
+    "body_height_m": 0.355,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -53,
+     127
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "Object is about 0.84 m ahead, nearly along the robot heading; a permitted 0.15 m approach adjustment reduces reach to roughly 0.69 m, within the arm's effective 3D reach for the shown height. The scene is open with free approach directions and no nearby blocking obstacle.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Infeasible: reach_ok is false, and the top-down approach is blocked.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 10995116301304,
+   "label": 1.0,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 0.75,
+   "weak_h45": 0.75,
+   "weak_h60": 0.75,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 32,
+    "tried": 2
+   },
+   "features": {
+    "bearing_deg": -17.7,
+    "shoulder_to_object_xy_m": 0.877,
+    "object_height_m": 0.052,
+    "body_height_m": 0.385,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -66,
+     -21,
+     24,
+     69,
+     114,
+     159,
+     -156,
+     -111
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is about 0.91 m from the base, but a small ~0.1 m adjustment brings it within the arm's roughly 0.8 m reach. Approach directions are essentially clear, with no nearby obstacle blocking the grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "reach_ok is false, so the arm cannot reach the object from this base pose even with allowed small adjustments.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 10995116303868,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 80,
+    "tried": 5
+   },
+   "features": {
+    "bearing_deg": -108.1,
+    "shoulder_to_object_xy_m": 0.846,
+    "object_height_m": 0.662,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -177,
+     3
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.74,
+    "reason": "The object is about 0.84 m from the base, but a small backward/left base adjustment can bring it within the arm's roughly 0.8 m reach. It is on the table near the wall, yet the sketch shows at least some clear approach directions and no obvious obstruction between the rear-mounted arm and object.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is -108\u00b0, outside the arm's \u00b160\u00b0 forward workspace even after the allowed \u00b117\u00b0 base turn; no free approach direction is sufficiently aligned.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 12094627915952,
+   "label": 0.25,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.25,
+   "weak_h45": 0.5,
+   "weak_h60": 0.5,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 24,
+    "tried": 3
+   },
+   "features": {
+    "bearing_deg": 124.8,
+    "shoulder_to_object_xy_m": 0.74,
+    "object_height_m": 0.505,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -28,
+     152
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is about 0.72 m from the base and within the arm's roughly 1 m reach. It is on the nearby table edge with clear open space between it and the robot; the limited free approach directions still include viable directions for a grasp after small base adjustment.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "The object bearing is 124.8\u00b0, far outside the arm's \u00b160\u00b0 forward workspace; the allowed \u00b117\u00b0 base turn cannot correct this, despite adequate reach.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 12094627926809,
+   "label": 0.25,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.25,
+   "weak_h45": 0.25,
+   "weak_h60": 0.25,
+   "oracle": 0.75,
+   "oracle_info": {
+    "plans": 193,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": -51.4,
+    "shoulder_to_object_xy_m": 0.542,
+    "object_height_m": 0.605,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -45,
+     135
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "uncertain",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is about 0.56 m ahead of the base and within the arm's reach; the direct approach from the robot appears clear, with only side directions blocked. Small base adjustment should allow a grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "Object bearing is -51.4\u00b0, within the arm's \u00b160\u00b0 forward workspace, and reach_ok is true. A free approach at -45\u00b0 closely matches the object direction, though the nearby table and blocked top-down view add some risk.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 12094627926885,
+   "label": 0.25,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.25,
+   "weak_h45": 0.25,
+   "weak_h60": 0.25,
+   "oracle": 0.5,
+   "oracle_info": {
+    "plans": 193,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": -51.4,
+    "shoulder_to_object_xy_m": 0.542,
+    "object_height_m": 0.605,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -45,
+     135
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "uncertain",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.72,
+    "reason": "The object is about 0.56 m from the base and 0.40 m above the shoulder, within the arm's reach. It appears accessible from the robot's current lower-side approach, with small base adjustment likely sufficient despite side obstruction.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is within the arm's reachable distance and its bearing (-51.4\u00b0) is within the forward workspace. A free approach at -45\u00b0 closely matches the object direction, so the nearby table does not clearly prevent grasping.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 13194139536043,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 216,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": 99.6,
+    "shoulder_to_object_xy_m": 0.67,
+    "object_height_m": 0.758,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -12,
+     168
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.78,
+    "reason": "The object is about 0.66 m from the base and only ~0.16 m above the shoulder, within the arm's roughly 0.8 m reach. It is laterally adjacent to the robot with free approach directions, and the nearby table does not clearly block the arm path.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is 99.6\u00b0, and the allowed \u00b117\u00b0 base turn still leaves it well outside the arm's \u00b160\u00b0 forward workspace.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 13194139545278,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 0,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": -140.3,
+    "shoulder_to_object_xy_m": 0.841,
+    "object_height_m": 0.605,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     160,
+     -155,
+     -110,
+     -65,
+     -20,
+     25,
+     70,
+     115
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.88,
+    "reason": "The object is about 0.8 m from the base and lies nearly directly behind the robot, matching the arm's rear-mounted workspace. The table edge is close but approach directions are mostly free, and depth views show no decisive obstruction.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is -140.3\u00b0, far outside the arm's \u00b160\u00b0 front workspace; small allowed turns cannot correct this.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 14293651182783,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 197,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": -17.0,
+    "shoulder_to_object_xy_m": 0.647,
+    "object_height_m": 0.069,
+    "body_height_m": 0.117,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -134,
+     46
+    ],
+    "furniture_within_0_3m": [
+     "obstacle"
+    ]
+   },
+   "rule": "feasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.82,
+    "reason": "The object is about 0.67 m from the shoulder, within the arm's roughly 0.8 m reach, and lies nearly along the robot's current heading. A clear approach direction appears available despite a nearby obstacle, so only minor base adjustment should be needed.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "uncertain",
+    "confidence": 0.76,
+    "reason": "Reach and bearing are acceptable, but the nearest free approach is 46\u00b0 versus the object bearing of -17\u00b0 (about 63\u00b0 apart, just beyond the ~60\u00b0 limit), with a nearby obstacle and no clear top-down free path.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 14293651183019,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 15,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 18.5,
+    "shoulder_to_object_xy_m": 0.787,
+    "object_height_m": 0.596,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     39,
+     -141
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "feasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.78,
+    "reason": "The object is about 0.82 m ahead at roughly shoulder height, near the arm's ~0.8 m reach but within the allowed 0.15 m base adjustment. The top-down layout shows a clear approach from the robot's side despite side obstacles.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is within the allowed bearing (18.5\u00b0), reach_ok is true, and a free approach at 39\u00b0 is within the usable \u00b160\u00b0 sector. The nearby table adds some obstruction risk but does not clearly block the viable approach.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 15393162807666,
+   "label": 1.0,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 1.0,
+   "weak_h45": 1.0,
+   "weak_h60": 1.0,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 18,
+    "tried": 1
+   },
+   "features": {
+    "bearing_deg": -34.2,
+    "shoulder_to_object_xy_m": 0.834,
+    "object_height_m": 0.069,
+    "body_height_m": 0.383,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     48,
+     -132
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.82,
+    "reason": "The object is unobstructed and within the arm's approximately 0.8 m reach after a small base adjustment; approach directions appear available.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "The geometry explicitly reports reach_ok=false, and no free approach direction is within the required \u00b160\u00b0 of the object bearing (\u221234\u00b0); therefore the grasp cannot be completed with small base adjustments.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 16492674427524,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 154,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 127.4,
+    "shoulder_to_object_xy_m": 0.745,
+    "object_height_m": 0.073,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     71,
+     116,
+     161,
+     -154,
+     -109,
+     -64,
+     -19,
+     26
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.78,
+    "reason": "Object is about 0.73 m from the base, within the arm's roughly 0.8 m reach, with nearly all approach directions free and no evident obstacle blocking access; small base adjustment should make the low object reachable.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is 127.4\u00b0, far outside the arm's roughly \u00b160\u00b0 forward workspace; the allowed \u00b117\u00b0 base turn cannot bring it into reach despite reach_ok being true.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 16492674431789,
+   "label": 0.5,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 1.0,
+   "weak_h45": 1.0,
+   "weak_h60": 1.0,
+   "oracle": 1.0,
+   "oracle_info": {
+    "plans": 122,
+    "tried": 3
+   },
+   "features": {
+    "bearing_deg": -0.2,
+    "shoulder_to_object_xy_m": 0.626,
+    "object_height_m": 0.071,
+    "body_height_m": 0.085,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     38,
+     -142
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "feasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.84,
+    "reason": "The object is about 0.65 m ahead of the base, within the arm's roughly 0.8 m reach, with clear approach directions and no nearby obstacles blocking access. Small base adjustments should suffice.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "feasible",
+    "confidence": 0.94,
+    "reason": "Object is nearly straight ahead (bearing -0.2\u00b0), reach_ok is true, and a free approach at 38\u00b0 lies within the robot's \u00b160\u00b0 forward workspace.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 17592186052509,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 3,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": -144.2,
+    "shoulder_to_object_xy_m": 0.75,
+    "object_height_m": 0.574,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     137,
+     -43
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is about 0.73 m laterally from the shoulder, within the arm's roughly 0.80 m reach. The top-down sketch shows a clear approach direction from the robot toward the object, with no blocking obstacle, and only small base adjustment is needed.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "The object is at a bearing of -144.2\u00b0, far outside the arm's forward \u00b160\u00b0 workspace; the allowed \u00b117\u00b0 base turn cannot bring it within reach. It is effectively behind the robot.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 17592186053171,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 206,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": 105.1,
+    "shoulder_to_object_xy_m": 0.635,
+    "object_height_m": 0.681,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     30
+    ],
+    "furniture_within_0_3m": [
+     "obstacle",
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.68,
+    "reason": "The object is about 0.62 m from the base, within the arm's roughly 0.8 m reach, and the top-down view shows an open approach direction toward it; small base adjustment should allow the grasp despite side obstacles.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is 105.1\u00b0, remaining well outside the arm's roughly \u00b160\u00b0 forward workspace even after the allowed \u00b117\u00b0 base turn; the free approach at 30\u00b0 also cannot align.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 17592186060123,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 205,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": 100.1,
+    "shoulder_to_object_xy_m": 0.774,
+    "object_height_m": 0.667,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     6,
+     -174
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "uncertain",
+    "confidence": 0.62,
+    "reason": "The object is near the arm's maximum horizontal reach and sits beside obstacles with most approach directions blocked; a small base shift may help, but collision-free grasping is not clear.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "The object is at a 100.1\u00b0 bearing, outside the arm's \u00b160\u00b0 forward workspace even after the allowed \u00b117\u00b0 turn. Its free approach directions (6\u00b0 and \u2212174\u00b0) also do not align with the object, and the top-down approach is blocked.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 17592186062891,
+   "label": 1.0,
+   "geom_stored": 0.0,
+   "geom_rerun": 0.0,
+   "weak_rerun": 1.0,
+   "weak_h45": 1.0,
+   "weak_h60": 1.0,
+   "oracle": 0.75,
+   "oracle_info": {
+    "plans": 23,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": -17.3,
+    "shoulder_to_object_xy_m": 0.889,
+    "object_height_m": 0.061,
+    "body_height_m": 0.152,
+    "reach_ok": false,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -43,
+     2,
+     47,
+     -178,
+     -133,
+     -88
+    ],
+    "furniture_within_0_3m": [
+     "obstacle"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.89,
+    "reason": "The object is within the arm's reachable workspace after a small base adjustment, and the approach directions around it are mostly free. The robot is already oriented toward the object with no nearby wall blocking the grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "reach_ok is false and no free top-down approach is available; the nearby obstacle also blocks the grasp.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 18691697694688,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 91,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 18.0,
+    "shoulder_to_object_xy_m": 0.761,
+    "object_height_m": 0.074,
+    "body_height_m": 0.226,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     140,
+     -40
+    ],
+    "furniture_within_0_3m": []
+   },
+   "rule": "feasible",
+   "gpt_v1": {
+    "verdict": "infeasible",
+    "confidence": 0.84,
+    "reason": "The object is at the edge of the arm's reach from the current base, and the available approach direction appears blocked from the robot's side; small base adjustments are unlikely to provide a reliable grasp.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "feasible",
+    "confidence": 0.94,
+    "reason": "Object bearing is 18\u00b0 (within the arm's forward \u00b160\u00b0 workspace), reach_ok is true, and the free approach at \u221240\u00b0 is within about 60\u00b0 of the object direction. No nearby furniture blocks the forearm.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 19791209307388,
+   "label": 0.0,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.0,
+   "weak_h45": 0.0,
+   "weak_h60": 0.0,
+   "oracle": 0.0,
+   "oracle_info": {
+    "plans": 14,
+    "tried": 0
+   },
+   "features": {
+    "bearing_deg": 137.2,
+    "shoulder_to_object_xy_m": 0.788,
+    "object_height_m": 0.516,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -142,
+     38
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.86,
+    "reason": "The object is about 0.76 m from the base, within the arm's roughly 0.8 m reach, and the sketch shows a clear approach from the current pose with no blocking obstacle. Depth views also show no decisive obstruction.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is 137.2\u00b0, far outside the arm's \u00b160\u00b0 forward workspace even after the allowed \u00b117\u00b0 base turn; no free approach direction aligns with the object.",
+    "model": "gpt-6-astra"
+   }
+  },
+  {
+   "sample_id": 19791209324581,
+   "label": 0.5,
+   "geom_stored": 1.0,
+   "geom_rerun": 1.0,
+   "weak_rerun": 0.25,
+   "weak_h45": 0.25,
+   "weak_h60": 0.25,
+   "oracle": 0.5,
+   "oracle_info": {
+    "plans": 103,
+    "tried": 6
+   },
+   "features": {
+    "bearing_deg": 115.8,
+    "shoulder_to_object_xy_m": 0.75,
+    "object_height_m": 0.6,
+    "body_height_m": 0.385,
+    "reach_ok": true,
+    "top_down_free": false,
+    "free_approach_bearings_deg": [
+     -14,
+     166
+    ],
+    "furniture_within_0_3m": [
+     "table"
+    ]
+   },
+   "rule": "infeasible",
+   "gpt_v1": {
+    "verdict": "feasible",
+    "confidence": 0.74,
+    "reason": "The object is about 0.74 m from the shoulder, within the arm's roughly 0.8 m reach, and the top-down view shows an open approach from the robot's side despite obstacles blocking other directions. Small base adjustment should allow grasping.",
+    "model": "gpt-6-astra"
+   },
+   "gpt_v2": {
+    "verdict": "infeasible",
+    "confidence": 0.99,
+    "reason": "Object bearing is 115.8\u00b0, and the allowed \u00b117\u00b0 base turn still leaves it well outside the arm's \u00b160\u00b0 forward workspace.",
+    "model": "gpt-6-astra"
+   }
+  }
+ ]
+}

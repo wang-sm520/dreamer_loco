@@ -1,0 +1,80 @@
+{
+ "summary": {
+  "steps": 540000,
+  "hours": 30.0,
+  "episodes": 2179,
+  "skill_frac": {
+   "NAV": 0.6939,
+   "PICK": 0.1906,
+   "PLACE": 0.1155
+  },
+  "success": 0.8471776044056907,
+  "episodes_with_failure": 0.3432767324460762,
+  "episodes_ending_in_failure": 0.15282239559430932,
+  "term_reasons": {
+   "success": 1846,
+   "timeout": 149,
+   "collision": 61,
+   "drop": 120,
+   "too_many_failed_grasps": 3
+  },
+  "per_scene_type": {
+   "OPEN": {
+    "episodes": 547,
+    "success": 0.8884826325411335,
+    "pick_success": 0.9707495429616088
+   },
+   "WALL_BACK": {
+    "episodes": 525,
+    "success": 0.8361904761904762,
+    "pick_success": 0.9428571428571428
+   },
+   "SIDE_BLOCKED": {
+    "episodes": 575,
+    "success": 0.8017391304347826,
+    "pick_success": 0.9321739130434783
+   },
+   "LOW_FLOOR": {
+    "episodes": 532,
+    "success": 0.8646616541353384,
+    "pick_success": 0.9680451127819549
+   }
+  },
+  "labels": {
+   "pick": {
+    "labeled": 107225,
+    "frac_positive": 0.4495127069246911,
+    "hist": [
+     58327,
+     241,
+     458,
+     3211,
+     44988
+    ],
+    "aff_geom_auroc": 0.9336373888827514,
+    "aff_geom_ece": 0.07243646537654465
+   },
+   "place": {
+    "labeled": 72459,
+    "frac_positive": 0.5986971942753834,
+    "hist": [
+     28959,
+     51,
+     68,
+     165,
+     43216
+    ],
+    "aff_geom_auroc": 0.9606081784696503,
+    "aff_geom_ece": 0.04262410466608703
+   }
+  },
+  "explore_frac": 0.08072222222222222,
+  "dart_episode_frac": 0.5075722808627811,
+  "bad_pose_episodes": 672,
+  "early_switch_episodes": 283,
+  "mean_episode_steps": 245.24598439651217,
+  "mean_skill_switches": 4.921064708581918,
+  "chunk_files": 540,
+  "disk_gb": 1.173363344
+ }
+}
