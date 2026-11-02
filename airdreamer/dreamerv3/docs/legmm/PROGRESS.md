@@ -110,26 +110,51 @@
   - 头部 min_z 以内的像素 94.2%（站在桌边时桌子前立面距相机不到 0.28 m）；
   - 腕部 D405 到物体的 z 深度：预抓取时 0.252 m，抓取时 0.167 m。两者都远大于 0.07，所以物体在**整个接近过程**中都可见。
 
-## M2：专家、标注、QA、采集（进行中，2026-11-02）
+## M2：专家、标注、QA、采集（2026-11-02；差 QA 收尾）
 
-### 已完成
-- `embodied/envs/legmm/planning.py`：用 Dijkstra 算栅格最短路，等价于从起点对所有候选终点同时做 A*；路径做视线捷径化；纯追踪按投影点向前取前视点。
-- `expert.py`：ScriptedExpert，用状态机执行导航、对准、直线接近、操作控制器（航点、预抓取、推进、闭合、抬起、收回）。
-  - 规划时对整条航点路径插值检查碰撞。
-  - 多样性：坏站位 30%，提前切换 20%，DART（σ=0.1，50% 的回合），约 10% 的步数为探索片段，失败后后退、重规划或换一侧。
-- `labeler.py`：从快照出发、只允许 base_adj、K=4 次 rollout；几何启发式 aff_geom。
-- `tools/label_qa.py`：审核工具，judge 可插拔，只剔除样本、不改标签值。
-- `collect.py`：采集器，写 replay chunk 和旁路表 `meta/`。
-- `dataset_stats.py`：统计和图。
-- 测试：`tests/legmm` 共 48 passed，新增 offline replay 往返、replay 中动作的 mask、专家回报高于随机、标注器不改动环境状态、QA 只改 mask。
-- 环境规则修订：持物时物体底部压到支撑面，改为阻挡手臂运动、不算掉落；记录 `drop_reason`。
+### 完成项
+- `planning.py`：栅格 Dijkstra（等价于从起点对所有候选终点同时做 A*）、视线捷径化、基于投影点的纯追踪。
+- `expert.py`：ScriptedExpert，用状态机执行导航、对准、直线接近、操作控制器。操作控制器的流程：航点 → 预抓取 → 推进 → 闭合 → 抬起 → 收回。
+  - 规划时对整条航点路径插值检查碰撞（含 1 cm 规划余量）。
+  - 抓取后收回有两种方式：边收边转、先原地转再收。
+  - 导航带预测足迹安全过滤。
+  - 多样性：坏站位 0.3，提前切换 0.2，DART（σ=0.1，约 50% 回合），约 10% 步数为探索片段。噪声不作用于高度维和夹爪维。
+- `labeler.py`：从快照出发、只允许 base_adj、K=4 次 rollout；几何启发式 aff_geom（解析臂展加点碰撞，留 0.10 m 余量）。
+- `collect.py`、`dataset_stats.py`：replay chunk 加旁路表 `meta/`，生成统计 JSON 和图。
+- `tools/label_qa.py`：分三段 packets / judge / apply，判定可续跑、可并行；只剔除样本，不改标签值。
+  - judge 有两个实现：`legmm_judge_codex:judge`（air-5090 上的 Codex，gpt-6-astra，按用户要求）和 `legmm_judge_sonnet:judge`（Sonnet 5；air-5090 所在地区被 API 拒绝，返回 403，暂未使用）。
+- `tools/legmm_scene_viewer.py`：每类场景一张静态图（3D、俯视、两路深度）和一段专家执行视频，输出在 `docs/legmm/scenes/`。
+- 环境规则修订：
+  - 持物时物体底部压到支撑面，只阻挡手臂运动，不算掉落；
+  - 增加 `drop_reason`；
+  - 计入“含失败回合”的事件包括：以失败告终、抓取失败、抓取或放置控制器失败；不包括专家导航层面的重试。
+- 测试：`tests/legmm` 共 49 passed。
 
-### 验收数字（截至目前）
-| 项 | 结果 | 来源 |
-|---|---|---|
-| 专家成功率（关闭多样性，每类 100 回合） | OPEN 0.96，WALL_BACK 0.91，SIDE_BLOCKED 0.86，LOW_FLOOR 0.83；CORNER 0.92，CUBBY 0.00 | `docs/legmm/m2_expert_eval.json` |
-| 专家成功率（开启多样性，每类 30 回合） | OPEN 0.83，WALL_BACK 0.83，SIDE_BLOCKED 0.60，LOW_FLOOR 0.77，CORNER 0.80，CUBBY 0.00 | `docs/legmm/m2_expert_eval_diversity.json` |
-| 30 h 数据集统计、aff_geom AUROC | **采集中**，见 `~/data/legmm_v1/train/dataset_stats.json` | — |
+### 验收数字
+| 项 | 结果 | 验收线 | 来源 |
+|---|---|---|---|
+| 专家成功率（关闭多样性，每类 100 回合） | OPEN **0.96**，WALL_BACK **0.91**，SIDE_BLOCKED **0.86**，LOW_FLOOR **0.83**（CORNER 0.92，CUBBY 0.00） | ≥0.85 / ≥0.70 | `docs/legmm/m2_expert_eval.json` |
+| aff_geom 对 rollout 标签（阈值 >0.5）的 AUROC，train | pick **0.862**，place **0.897** | ≥0.8 | `docs/legmm/m2_dataset_stats_train.json` |
+| 同上，val | pick 0.843，place 0.903 | — | `docs/legmm/m2_dataset_stats_val.json` |
+| 数据量 | train 540,000 步 = 30.00 h，2182 个回合，1.15 GB，用时 968 s（20 进程）；val 54,000 步 = 3.00 h，199 个回合 | 30 h | 同上 |
+| 含失败的回合比例 | train **0.336**，val 0.362；其中以失败告终的为 0.186 / 0.226 | 0.25–0.40 | 同上 |
+| 技能占比（train） | NAV 0.713，PICK 0.179，PLACE 0.108 | — | 同上 |
+| 各场景专家成功率（train，开启多样性） | OPEN 0.889，WALL_BACK 0.795，SIDE_BLOCKED 0.795，LOW_FLOOR 0.782 | — | 同上 |
+| 标签数量（train） | pick 100,736 条（34.3% 为正），place 66,757 条（51.5% 为正） | — | 同上 |
+| 审核筛选 | 24,511 / 167,493 条标签被选中，占 14.6% | — | `label_qa.py --stage packets` |
+| Codex 判定速度 | 约 89 s 每次（3 次顺序调用共 4 分 27 秒） | — | 手动计时 |
+
+图：`docs/legmm/figs/{summary,coverage_pick,episode_length}.png`；场景图和视频在 `docs/legmm/scenes/`。
+
+### 与任务书的偏离
+1. 预操作站位的半径范围为 0.45–0.96 m，加 ±0.1/0.2 m 横向偏移和两种朝向；任务书为 0.35–0.55 m。原因是 A2 机身长 0.82 m，站在桌前时机身中心离物体至少约 0.5–0.7 m。
+2. A* 用一次 Dijkstra 代替，效果等价；规划先用 0.45 m 膨胀，找不到路径再退回任务书的 0.3 m。
+3. 标注器的局部规划允许 ±0.15 m / ±0.12 m / ±0.3 rad 的底盘偏移，即任务书说的“只允许 base_adj”；rollout 最长 30 步，带 σ=0.05 的动作噪声。
+4. “含失败回合”的口径如上（不计导航重试），否则会是 0.47。
+5. 审核判定改用 Codex gpt-6-astra（用户指定），不用 Sonnet 5（API 在该地区被拒绝）。
+6. 环境规则修订见上文。
 
 ### 未解决
-见 `docs/legmm/HANDOFF.md` 第 5 节：审核模型（§11 第 5 项）、失败回合比例的口径、CUBBY 专家成功率为 0、头部相机分辨率和 min_z。
+- **QA**：200 个样本的 Codex 试点正在运行（`~/data/legmm_v1/train/qa/verdicts.jsonl`，日志 `~/logdir/legmm/qa_pilot.log`）。全量 24.5k 条在 8 路并行下约需 3 天。前 3 条判定都和 rollout 相反（rollout 为 0，Codex 判可行，置信度 0.71–0.84），可能需要提高阈值或缩小范围。等试点的一致率出来后由用户决定。
+- **CUBBY 专家成功率为 0**：原因见 `docs/legmm/scenes/5_CUBBY.png`。多数候选够不着；完全趴下时前臂会碰机头；腕部相机支架会撞顶板。加入夹爪 ±90° 滚转后仍为 0，已撤回该改动。需要用户决定是否改格子柜的尺寸。
+- 机械臂安装位置仍是推算值。

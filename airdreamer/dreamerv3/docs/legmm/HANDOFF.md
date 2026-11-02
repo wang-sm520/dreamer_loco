@@ -1,4 +1,4 @@
-# legmm 交接文档（2026-11-02）
+# legmm 交接文档（2026-11-02 更新）
 
 任务书：`/Users/amiao/Desktop/ADY/OPUS_TASK_BRIEF.md`（本机）。实测数字以 `docs/legmm/PROGRESS.md` 为准；本文只说明当前状态、怎么接着做、有哪些坑。
 
@@ -44,20 +44,17 @@
 
 ## 3. 正在跑的任务，以及接下来要做的事
 
-```bash
-# 采集（nohup 在 air-5090 后台；train 完成后自动接 val）
-python -m embodied.envs.legmm.collect --split train --hours 30 --workers 20 --out ~/data/legmm_v1/train
-python -m embodied.envs.legmm.collect --split val   --hours 3  --workers 20 --seed 1 --out ~/data/legmm_v1/val
-# 日志：~/logdir/legmm/collect_{train,val}.log
-# 2026-11-02 12:30 时 train 约 64%（336 个 chunk，约 34 万步，701 MB）
-# 是否结束：ls ~/data/legmm_v1/train/meta/collect_info.json
-```
-
-采完之后按顺序做：
-1. 查看 `~/data/legmm_v1/{train,val}/dataset_stats.json` 和 `figs/`（summary、coverage_pick、episode_length），把数字和图复制到 `docs/legmm/`，写进 PROGRESS。
-2. QA 干跑（只筛选，不调模型）：`python tools/label_qa.py --data ~/data/legmm_v1/train --max_packets 200`，记录 selected_frac。
-3. 写 PROGRESS 的 M2 一节，提交 git，按 §12 格式汇报。
-4. **停下来问用户 §11 第 5 项**：AI 审核用哪个多模态模型、怎么调用。实现方式是写一个 `module:function`，签名为 `judge(packet) -> {verdict: feasible|infeasible|uncertain, confidence, reason}`；packet 里有 `images`（俯视图、两路深度图的路径）和 `state`（含 `question`）。然后运行 `python tools/label_qa.py --data ... --judge mod:fn --apply True`。
+- 数据已经重新采完（专家调过参数），位于 `~/data/legmm_v1/{train,val}`。调参前的旧数据在 `~/data/legmm_v1_pretune`，可以删除。
+- **QA 试点正在运行**（Codex gpt-6-astra，200 个样本，8 路并行，约 40 分钟）：
+  ```bash
+  wc -l ~/data/legmm_v1/train/qa/verdicts.jsonl          # 进度
+  python tools/label_qa.py --stage apply --data ~/data/legmm_v1/train \
+      --verdicts ~/data/legmm_v1/train/qa/verdicts.jsonl   # 只出报告，不改数据（--apply 默认 False）
+  cat ~/data/legmm_v1/train/qa/qa_report.json             # 看 agree_with_rollout、rejected 等字段
+  ```
+  先看 Codex 和 rollout 的一致率，再和用户确定剔除阈值（目前 0.8）以及审核范围（全量 24.5k 条在 8 路下约 3 天），然后加 `--apply True` 正式应用。
+- 然后按 §12 汇报 M2，进入 M3。
+- 场景图和视频：`docs/legmm/scenes/`；本机副本在 `~/Downloads/legmm_scenes/`。
 
 ## 4. 已经定下来的硬件参数
 
@@ -72,10 +69,11 @@ python -m embodied.envs.legmm.collect --split val   --hours 3  --workers 20 --se
 
 ## 5. 需要找用户确认的事项
 
-1. §11 第 5 项：审核模型和 judge_fn（M2 收尾时必须确认）。
-2. “含失败的回合”比例约 52%，高于任务书目标 25–40%。原因是任务书规定的坏站位 30%、提前切换 20% 本身就会产生“失败后恢复”；如果只算以失败告终的回合，约为 24%。需要用户选定指标的口径，或者调整这两个概率。
-3. **CUBBY 的专家成功率为 0**：kin 模型的两连杆“肘部朝上”IK 无法从顶板下方水平伸进格子柜。CUBBY 只出现在 test_constrained，但这意味着在这个划分上任何策略都会失败。可选做法：调高格子柜的尺寸，或者给 IK 增加肘部向下的解。需要用户定。
-4. 头部 D435i 实际使用的分辨率和 min_z；机械臂安装位置的实测值。
+1. ✅ 审核模型：用户先指定 Sonnet 5（API 在该地区被拒绝，返回 403），后改为 **air-5090 上的 Codex gpt-6-astra**，judge 为 `tools/legmm_judge_codex.py`。待定的是阈值和审核范围（见第 3 节）。
+2. ✅ 失败回合比例：由我调整。改了统计口径并放宽了两处控制容差；任务书原定的概率保持不变。结果 train 0.336、val 0.362，在目标区间内。
+3. ⬜ CUBBY 专家成功率为 0：用户要先看场景，图和视频已提供。待决定：改格子柜尺寸（例如高 0.40–0.50 m，物体放在柜内 0.03–0.10 m），或者保留为“不可完成”的测试场景。
+4. ✅ 头部相机为 1920。D435i 的 1920 是 RGB 流，深度流最高 1280×720，min_z 取 0.28。
+5. ⬜ 机械臂安装位置的实测值。
 
 ## 6. 坑与约定（务必先看）
 
