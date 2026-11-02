@@ -28,6 +28,7 @@ TILTS = (0.30, 0.15, 0.0)          # approach axis tilt below horizontal (rad)
 PRE_BACK = 0.10                    # pre-grasp distance along the approach axis
 ARM_GAIN = 0.6                     # proportional gain on TCP / orientation errors
 PLAN_MARGIN = 0.01                 # extra clearance in planning (x3 for self collision)
+EXPLORE_SIGMA = 0.3                # noise of random exploration segments (normalized units)
 LIFT = 0.10
 STAGE_BACK = (0.4, 0.25, 0.6)
 LOCAL_OFFSETS = [(dx, dy, dyaw) for dx in (0.0, -0.15, 0.15) for dy in (0.0, -0.12, 0.12)
@@ -197,9 +198,9 @@ def place_candidates(backend, scene, bases_fn, jitter=np.zeros(2)):
     sd = scenes.APPROACH_DIRS[k][:2]
     shift = np.clip(zone.center + 0.10 * sd + jitter, zone.center - zone.half + r_obj,
                     zone.center + zone.half - r_obj)
-    # Release with the bottom 2.2 cm above the support, inside the env's
-    # [-0.005, 0.03] window even if one latent arm command still moves it down.
-    center = np.array([*shift, zone.support_z + hz + 0.022])
+    # Release with the bottom 1.5 cm above the support: middle of the env's
+    # [-0.005, 0.03] window; the closed-loop hold during 'act' keeps it there.
+    center = np.array([*shift, zone.support_z + hz + 0.015])
     for base in bases_fn(sd, center):
       for pitch in PLACE_PITCHES:
         R_w = geo.rot_z(base[2]) @ geo.rot_pitch(-pitch)
@@ -432,8 +433,8 @@ class ManipController:
     n = float(np.linalg.norm(dee))
     if n > speed:   # scale, not per-axis clip, so the TCP path stays straight
       dee *= speed / n
-    if sub == 'act':
-      dee = np.zeros(3)
+    # During 'act' the loop keeps holding the goal pose (closed loop), which
+    # cancels latent commands and noise while the gripper toggles.
     R_tgt_b = kb.R_DEFAULT if sub in ('turn', 'retract') else Rb.T @ p.R_w
     drot = ARM_GAIN * geo.log_rot(R_tgt_b @ s.R_ee_b.T)
     n = float(np.linalg.norm(drot))
@@ -728,26 +729,45 @@ class ScriptedExpert:
       self.mode = 'plan'
 
   def _diversify(self, act):
+    """DART noise and exploration segments. Noise never touches the body
+    height or gripper dimensions (height jitter moves a held object by
+    centimetres; gripper noise toggles grasps), exploration never switches
+    skills while holding, and noisy NAV commands go through the footprint
+    safety filter."""
     c = self.cfg
     if not c.diversity:
       return act
     key = I.SKILL_ACTION_KEY[I.Skill(int(act['skill']))]
+    holding = self.backend.state.holding
     if self.explore_left == 0 and self.rng.random() < c.explore_frac / 10.0:
       self.explore_left = int(self.rng.integers(5, 16))
-      self.explore_skill = int(self.rng.integers(3)) if self.rng.random() < 0.3 else None
+      self.explore_skill = None
+      if not holding and self.rng.random() < 0.3:
+        self.explore_skill = int(self.rng.integers(3))
+    sigma = 0.0
     if self.explore_left > 0:
       self.explore_left -= 1
       self.stats['explore_steps'] += 1
       if self.explore_skill is not None:
         act = _dict(self.explore_skill, act[I.SKILL_ACTION_KEY[I.Skill(self.explore_skill)]])
         key = I.SKILL_ACTION_KEY[I.Skill(self.explore_skill)]
-      vec = act[key] + self.rng.normal(0, 0.5, act[key].shape)
-      act = dict(act, **{key: np.clip(vec, -1, 1).astype(np.float32)})
-      if self.explore_left == 0 and self.mode not in ('idle',):
+      sigma = EXPLORE_SIGMA
+      if self.explore_left == 0 and self.mode != 'idle':
         self.mode = 'plan'
         self.n_plans = max(0, self.n_plans - 1)
+    elif self.dart:
+      sigma = c.dart_sigma
+    if sigma == 0.0:
       return act
-    if self.dart:
-      vec = act[key] + self.rng.normal(0, c.dart_sigma, act[key].shape)
-      act = dict(act, **{key: np.clip(vec, -1, 1).astype(np.float32)})
-    return act
+    noise = self.rng.normal(0, sigma, act[key].shape)
+    layout = I.NAV_LAYOUT if key == 'nav' else I.MANIP_LAYOUT
+    for name in ('height', 'grip'):
+      if name in layout:
+        noise[layout[name][0]] = 0.0
+    vec = np.clip(act[key] + noise, -1, 1).astype(np.float32)
+    if key == 'nav':
+      ph = I.scale_action(vec, I.NAV_LAYOUT)
+      vx, vy, wz = self._safe(float(ph['vx'][0]), float(ph['vy'][0]), float(ph['wz'][0]))
+      vec = I.unscale_action({'vx': vx, 'vy': vy, 'wz': wz, 'height': ph['height']},
+                             I.NAV_LAYOUT, I.NAV_DIM)
+    return dict(act, **{key: vec})

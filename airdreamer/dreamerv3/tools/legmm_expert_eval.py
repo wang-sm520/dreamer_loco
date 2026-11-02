@@ -18,7 +18,7 @@ import numpy as np
 
 
 def run_episodes(args):
-  split, seeds, diversity, wid = args
+  split, seeds, diversity, wid, overrides = args
   from legmm_utils import make_env, zero_action
   from embodied.envs.legmm import expert as ex
   from embodied.envs.legmm import interfaces as I
@@ -28,7 +28,7 @@ def run_episodes(args):
   for seed in seeds:
     env.forced_seed = int(seed)
     obs = env.step(zero_action(reset=True))
-    expert = ex.ScriptedExpert(ex.ExpertConfig(diversity=diversity))
+    expert = ex.ScriptedExpert(ex.ExpertConfig(diversity=diversity, **overrides))
     expert.reset(env.scene, np.random.default_rng(rng.integers(2 ** 63)), env.backend)
     ret, steps, last_skill, holding_before = 0.0, 0, 0, False
     t0 = time.perf_counter()
@@ -63,7 +63,7 @@ def _drop_diag(env, sub):
   pts_b = (pts - b.base_pos(s)) @ b.R_body(s)
   hp = b.held_points(s)
   return dict(
-      sub=sub, h=round(float(s.h), 3), latency=int(b.dr.arm_latency),
+      sub=sub, reason=b.drop_reason, h=round(float(s.h), 3), latency=int(b.dr.arm_latency),
       arm_static=[int(i) for i in np.where(geo.points_in_boxes(pts, b._static, kb.LINK_RADIUS).any(1))[0]],
       arm_body=[int(i) + 1 for i in np.where(geo.points_in_boxes(pts_b[1:], kb.BODY_BOX[None], 0.01).any(1))[0]],
       held_static=bool(geo.points_in_boxes(hp[:1], b._static, float(env.scene.obj.half[0])).any()),
@@ -76,8 +76,12 @@ def main():
   p.add_argument('--diversity', default='False')
   p.add_argument('--workers', type=int, default=16)
   p.add_argument('--out', default='')
+  p.add_argument('--cfg', default='', help='ExpertConfig overrides, e.g. explore_frac=0,p_dart=0')
+  p.add_argument('--types', default='', help='comma separated scene type ids to run')
   a = p.parse_args()
   diversity = a.diversity == 'True'
+  overrides = {kv.split('=')[0]: float(kv.split('=')[1]) for kv in a.cfg.split(',') if kv}
+  types = {int(t) for t in a.types.split(',') if t}
   from embodied.envs.legmm import interfaces as I
   from embodied.envs.legmm import scenes
   jobs = []
@@ -88,11 +92,13 @@ def main():
       t = int(scenes.scene_type_of(split, seed))
       if split == 'test_constrained' and t not in (4, 5):
         continue
+      if types and t not in types:
+        continue
       if len(by_type[t]) < a.episodes:
         by_type[t].append(seed)
     for t, seeds in by_type.items():
       for k in range(0, len(seeds), max(1, len(seeds) // 4)):
-        jobs.append((split, seeds[k:k + max(1, len(seeds) // 4)], diversity, len(jobs)))
+        jobs.append((split, seeds[k:k + max(1, len(seeds) // 4)], diversity, len(jobs), overrides))
   with mp.Pool(a.workers) as pool:
     rows = [r for chunk in pool.map(run_episodes, jobs) for r in chunk]
   names = [t.name for t in I.SceneType]

@@ -143,6 +143,7 @@ class KinBackend:
     self.scene = scene
     self.rng = rng
     self.dr = dr or DomainRand()
+    self.drop_reason = ''
     x, y, yaw = scene.start
     self.state = KinState(
         x=float(x), y=float(y), yaw=float(yaw), h=I.BASE_HEIGHT_RANGE[1], pitch=0.0,
@@ -244,25 +245,30 @@ class KinBackend:
     hz = self.scene.obj.half[2]
     return np.array([c, c - [0, 0, hz - 0.005]])
 
-  def arm_collides(self, s=None, margin=0.0):
-    """margin > 0 adds clearance (used by planners to leave room for tracking
-    errors); the environment itself always checks with margin 0."""
+  def collision_kind(self, s=None, margin=0.0):
+    """'' if free, else 'arm' (links / self collision), 'held' (held object
+    body), or 'held_bottom' (only the held object's bottom touches a support:
+    the arm is blocked, the object is not knocked away). margin > 0 adds
+    clearance for planners; the environment checks with margin 0."""
     s = s or self.state
     pts = self.arm_points(s)
     if geo.points_in_boxes(pts, self._static, LINK_RADIUS + margin).any():
-      return True
+      return 'arm'
     # Self collision with the dog body (skip the first upper-arm sample).
     pts_b = (pts - self.base_pos(s)) @ self.R_body(s)
     if geo.points_in_boxes(pts_b[1:], BODY_BOX[None], 0.01 + 3 * margin).any():
-      return True
+      return 'arm'
     if s.holding:
       hp = self.held_points(s)
       r = float(self.scene.obj.half[0])
-      if geo.points_in_boxes(hp[:1], self._static, r).any():
-        return True
-      if geo.points_in_boxes(hp[1:], self._static, 0.0).any() or hp[1, 2] < 0.0:
-        return True
-    return False
+      if geo.points_in_boxes(hp[:1], self._static, r + margin).any():
+        return 'held'
+      if geo.points_in_boxes(hp[1:], self._static, margin).any() or hp[1, 2] < margin:
+        return 'held_bottom'
+    return ''
+
+  def arm_collides(self, s=None, margin=0.0):
+    return bool(self.collision_kind(s, margin))
 
   def base_collides(self, s=None):
     s = s or self.state
@@ -332,13 +338,18 @@ class KinBackend:
       s.ee_b = self.clip_ee(s.ee_b, s)
     if s.holding:
       self._carry(s)
-    if self.arm_collides(s):
-      if s.holding:
+    kind = self.collision_kind(s)
+    if kind:
+      if s.holding and kind != 'held_bottom':
         s.holding = False
         ev['dropped'] = True
+        self.drop_reason = f'collision_{kind}'
       else:
+        # Blocked arm (or held object pressed onto a support): undo the arm motion.
         ev['arm_collision'] = True
         s.ee_b, s.R_ee_b = prev.ee_b.copy(), prev.R_ee_b.copy()
+        if s.holding:
+          self._carry(s)
         if self.arm_collides(s):
           # Posture or base motion pushed the arm into geometry: undo the step.
           arm_queue = s.arm_queue
@@ -400,6 +411,8 @@ class KinBackend:
       ev['place_success'] = True
     else:
       ev['dropped'] = True
+      self.drop_reason = (f'release_outside_zone' if not inside else
+                          f'release_height_{bottom - zone.support_z:+.3f}')
 
   # ---------------------------------------------------------------- sensors
 

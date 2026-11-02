@@ -162,7 +162,7 @@ def aff_geom_place(backend, scene):
   r_obj = float(scene.obj.half[0])
   xy = np.clip(zone.center + 0.10 * toward, zone.center - zone.half + r_obj,
                zone.center + zone.half - r_obj)
-  target = np.array([*xy, zone.support_z + scene.obj.half[2] + 0.022])
+  target = np.array([*xy, zone.support_z + scene.obj.half[2] + 0.015])
   base = (s.x, s.y, s.yaw)
   heading = math.atan2(target[1] - sh_w[1], target[0] - sh_w[0])
   if abs(math.atan2(math.sin(heading - s.yaw), math.cos(heading - s.yaw))) > math.radians(90):
