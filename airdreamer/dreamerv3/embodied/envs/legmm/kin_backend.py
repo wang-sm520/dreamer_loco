@@ -41,7 +41,7 @@ REACH_MIN = 0.08             # min shoulder-to-wrist distance
 
 # TCP poses relative to the shoulder (joint2), body frame.
 STOW_REL = np.array([0.33, 0.0, 0.0])      # folded, gripper forward over the head
-CARRY_REL = np.array([0.40, 0.0, 0.05])
+CARRY_REL = np.array([0.30, 0.0, 0.30])      # high: the object clears table tops while turning
 R_STOW = np.eye(3)                          # approach axis forward, horizontal
 R_DEFAULT = geo.rot_pitch(math.radians(-30.0))   # carry: 30 deg down
 
@@ -244,14 +244,16 @@ class KinBackend:
     hz = self.scene.obj.half[2]
     return np.array([c, c - [0, 0, hz - 0.005]])
 
-  def arm_collides(self, s=None):
+  def arm_collides(self, s=None, margin=0.0):
+    """margin > 0 adds clearance (used by planners to leave room for tracking
+    errors); the environment itself always checks with margin 0."""
     s = s or self.state
     pts = self.arm_points(s)
-    if geo.points_in_boxes(pts, self._static, LINK_RADIUS).any():
+    if geo.points_in_boxes(pts, self._static, LINK_RADIUS + margin).any():
       return True
     # Self collision with the dog body (skip the first upper-arm sample).
     pts_b = (pts - self.base_pos(s)) @ self.R_body(s)
-    if geo.points_in_boxes(pts_b[1:], BODY_BOX[None], 0.01).any():
+    if geo.points_in_boxes(pts_b[1:], BODY_BOX[None], 0.01 + 3 * margin).any():
       return True
     if s.holding:
       hp = self.held_points(s)

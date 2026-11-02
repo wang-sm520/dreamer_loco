@@ -329,6 +329,12 @@ def _connected(occ, room, start_xy, targets, radius):
   return True
 
 
+def scene_type_of(split, seed):
+  types = SPLITS[split]['types']
+  type_rng = np.random.default_rng([zlib.crc32(split.encode()), int(seed)])
+  return SceneType(int(types[int(type_rng.integers(len(types)))]))
+
+
 def make_scene(split, seed, cfg=None):
   cfg = dict(cfg or {})
   spec = SPLITS[split]
@@ -336,8 +342,7 @@ def make_scene(split, seed, cfg=None):
   lo, hi = cfg.get('n_obstacles', (3, 8))
   if spec.get('layout') == 'large_clutter':
     lo, hi = hi, hi + 6
-  type_rng = np.random.default_rng([zlib.crc32(split.encode()), int(seed)])
-  stype = SceneType(int(types[int(type_rng.integers(len(types)))]))
+  stype = scene_type_of(split, seed)
   for attempt in range(30):
     b = _Builder(split, seed, cfg, attempt)
     obj, _ = _furniture(b, stype)
