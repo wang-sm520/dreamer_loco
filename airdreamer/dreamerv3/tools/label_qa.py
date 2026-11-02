@@ -159,21 +159,29 @@ def _load_packets(pdir):
 
 
 def _judge_stage(a):
+  """Judges every packet without a verdict yet (resumable), a.workers calls in parallel."""
+  import concurrent.futures
+  import threading
   judge = load_judge(a.judge)
   vpath = pathlib.Path(a.verdicts).expanduser()
   done = set()
   if vpath.exists():
     done = {(v['sample_id'], v['which']) for v in map(json.loads, vpath.read_text().splitlines())}
+  todo = [p for p in _load_packets(a.packets)
+          if (p['state']['sample_id'], p['state']['which']) not in done]
+  lock = threading.Lock()
   n = 0
   with open(vpath, 'a') as f:
-    for packet in _load_packets(a.packets):
-      key = (packet['state']['sample_id'], packet['state']['which'])
-      if key in done:
-        continue
+    def work(packet):
       out = judge(packet)
-      f.write(json.dumps({'sample_id': key[0], 'which': key[1], 'judge': a.judge, **out}) + '\n')
-      f.flush()
-      n += 1
+      rec = {'sample_id': packet['state']['sample_id'], 'which': packet['state']['which'],
+             'judge': a.judge, **out}
+      with lock:
+        f.write(json.dumps(rec) + '\n')
+        f.flush()
+    with concurrent.futures.ThreadPoolExecutor(max(1, a.workers)) as pool:
+      for _ in pool.map(work, todo):
+        n += 1
   return n
 
 
@@ -227,6 +235,7 @@ def main():
   p.add_argument('--max_packets', type=int, default=0, help='0 = all selected samples')
   p.add_argument('--apply', default='False')
   p.add_argument('--seed', type=int, default=0)
+  p.add_argument('--workers', type=int, default=1, help='parallel judge calls')
   a = p.parse_args()
   if a.stage == 'judge':
     print(json.dumps({'judged': _judge_stage(a), 'verdicts': a.verdicts}))
