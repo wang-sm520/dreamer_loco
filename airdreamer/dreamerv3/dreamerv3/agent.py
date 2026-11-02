@@ -36,7 +36,9 @@ class Agent(embodied.jax.Agent):
     self.config = config
     
     #安全排除非必要键，确保编码器和解码器只处理状态相关观测，避免训练时无关数据污染状态表示
-    exclude = ('is_first', 'is_last', 'is_terminal', 'reward')
+    exclude = (
+        'is_first', 'is_last', 'is_terminal', 'reward',
+        *tuple(config.label_keys))
     enc_space = {k: v for k, v in obs_space.items() if k not in exclude}
     dec_space = {k: v for k, v in obs_space.items() if k not in exclude}
     
@@ -90,12 +92,28 @@ class Agent(embodied.jax.Agent):
     #设置损失函数中各部分的权重（loss scales），特别针对重建损失（reconstruction loss） 的权重分配
     scales = self.config.loss_scales.copy()
     rec = scales.pop('rec')
-    scales.update({k: rec for k in dec_space})
+    overrides = {}
+    if config.rec_scales:
+      overrides = {
+          key.strip(): float(value)
+          for item in config.rec_scales.split(',') if item.strip()
+          for key, value in [item.split('=', 1)]}
+    scales.update({k: overrides.get(k, rec) for k in dec_space})
     self.scales = scales
 
   @property
   def policy_keys(self):
     return '^(enc|dyn|dec|pol)/'
+
+  def mask_inactive(self, act):
+    if not self.config.skill.enabled:
+      return act
+    skill = act[self.config.skill.key]
+    act = dict(act)
+    for i, key in enumerate(self.config.skill.action_keys):
+      act[key] = act[key] * (skill == jnp.zeros_like(skill) + i)[..., None].astype(
+          act[key].dtype)
+    return act
 
   @property
   def ext_space(self):
@@ -135,6 +153,7 @@ class Agent(embodied.jax.Agent):
       dec_carry, dec_entry, recons = self.dec(dec_carry, feat, reset, **kw)
     policy = self.pol(self.feat2tensor(feat), bdims=1)
     act = sample(policy)
+    act = self.mask_inactive(act)
     out = {}
     out['finite'] = elements.tree.flatdict(jax.tree.map(
         lambda x: jnp.isfinite(x).all(range(1, x.ndim)),
@@ -190,7 +209,10 @@ class Agent(embodied.jax.Agent):
       space, value = self.obs_space[key], obs[key]
       assert value.dtype == space.dtype, (key, space, value.dtype)
       target = f32(value) / 255 if isimage(space) else value
-      losses[key] = recon.loss(sg(target))
+      loss = recon.loss(sg(target))
+      if self.config.rec_per_pixel_norm and len(space.shape) == 3:
+        loss /= space.shape[0] * space.shape[1]
+      losses[key] = loss
 
     B, T = reset.shape
     shapes = {k: v.shape for k, v in losses.items()}
@@ -200,7 +222,8 @@ class Agent(embodied.jax.Agent):
     K = min(self.config.imag_last or T, T)
     H = self.config.imag_length
     starts = self.dyn.starts(dyn_entries, dyn_carry, K)
-    policyfn = lambda feat: sample(self.pol(self.feat2tensor(feat), 1))
+    policyfn = lambda feat: self.mask_inactive(
+        sample(self.pol(self.feat2tensor(feat), 1)))
     _, imgfeat, imgprevact = self.dyn.imagine(starts, policyfn, H, training)
     first = jax.tree.map(
         lambda x: x[:, -K:].reshape((B * K, 1, *x.shape[2:])), repfeat)
