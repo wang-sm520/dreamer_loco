@@ -18,7 +18,8 @@ def test_legmm_presets(presets):
   assert c.task == 'legmm_mm'
   assert c.env.legmm.obs_depth_dtype == 'uint8'
   assert c.env.legmm.domain_rand.cam_noise_a == (0.001, 0.004)
-  assert c.env.legmm.camera_wrist.mount_xyz == (-0.08, 0.0, 0.06)
+  assert c.env.legmm.camera_wrist.mount_xyz == (-0.127, 0.0, 0.1115)
+  assert c.env.legmm.camera_head.mount_xyz == (0.35, 0.0, 0.08)
   assert c.agent.rec_scales == 'depth_head=1.0,depth_wrist=1.0,proprio=2.0,goal=2.0'
   assert c.agent.label_keys == ('label_aff', 'label_aff_mask', 'label_phase')
   assert c.agent.skill.enabled and c.agent.aff_head.enabled

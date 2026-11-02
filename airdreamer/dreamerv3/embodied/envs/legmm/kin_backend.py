@@ -1,11 +1,12 @@
 """Kinematic stand-in backend (brief §6.2): pure numpy, no physics engine.
 
-Base: planar pose (x, y, yaw) plus posture (height, pitch); body velocities
-and posture track their commands with first-order lags. Arm: the end-effector
-pose is commanded in the body frame, clipped to a reach shell around the
-shoulder, with a two-link vertical-plane IK for the elbow. Depth: vectorized
-ray casting against boxes, vertical cylinders, the floor, and (for the head
-camera) the arm links.
+Base: planar pose (x, y, yaw) plus body height; velocities and height track
+their commands with first-order lags (pitch is not commanded and stays 0).
+Arm: AIRBOT Play chain. The TCP pose is commanded in the body frame; the wrist
+center sits TOOL behind the TCP along the approach axis and is clipped to the
+shoulder's reach shell; a two-link vertical-plane IK places the elbow.
+Depth: vectorized ray casting against boxes, vertical cylinders, the floor,
+and (for the head camera) the arm and the wrist camera stand.
 """
 import copy
 import dataclasses
@@ -17,10 +18,13 @@ from . import geometry as geo
 from . import interfaces as I
 from . import scenes
 
-# TODO(calibrate): AIRBOT Play link lengths (sum = reach) and gripper stroke.
-LINK1 = 0.30
-LINK2 = 0.347
-GRIP_MAX_WIDTH = 0.10
+# AIRBOT Play (~/wang-sm/depth-mani/airbot_rl/assets/airbot_play.xml, which
+# matches the DISCOVERSE model plus the wrist camera stand):
+SHOULDER_Z = 0.1172          # arm_base -> joint2 axis
+UPPER = 0.27009              # joint2 -> joint3
+FORE = 0.29015               # joint3 -> wrist (joint4/5)
+TOOL = 0.241                 # wrist (joint5) -> TCP between the finger pads
+GRIP_MAX_WIDTH = 0.08        # two fingers x 0.04 m stroke
 LINK_RADIUS = 0.03
 GRIP_RATE = 0.5              # normalized opening change per high-level step
 ARM_SPEED_NAV = 0.05         # m per step when NAV moves the arm to stow/carry
@@ -31,11 +35,15 @@ GRASP_P = 0.92
 GRASP_ATTEMPT_RADIUS = 0.15  # closing farther than this from the object is not an attempt
 PLACE_TOL = 0.03
 KIN_SUBSTEPS = 8             # base integration substeps per high-level step
-BODY_CLEAR = np.array([0.45, 0.25, 0.10])   # ee may not enter |x|<.45, |y|<.25, z<.10 (body frame)
+# A2 base_link mesh bounds (unitree_a2/xmls/assets/base_link.STL), incl. head.
+BODY_BOX = np.array([-0.33, -0.145, -0.08, 0.39, 0.145, 0.13])
+REACH_MIN = 0.08             # min shoulder-to-wrist distance
 
-STOW_B = np.array([0.25, 0.0, 0.30])
-CARRY_B = np.array([0.40, 0.0, 0.30])
-R_DEFAULT = geo.rot_pitch(math.radians(-30.0))   # approach axis forward, 30 deg down
+# TCP poses relative to the shoulder (joint2), body frame.
+STOW_REL = np.array([0.30, 0.0, 0.02])     # folded, gripper forward over the head
+CARRY_REL = np.array([0.40, 0.0, 0.05])
+R_STOW = np.eye(3)                          # approach axis forward, horizontal
+R_DEFAULT = geo.rot_pitch(math.radians(-30.0))   # carry: 30 deg down
 
 
 @dataclasses.dataclass
@@ -55,9 +63,9 @@ class KinState:
   y: float
   yaw: float
   h: float
-  pitch: float
+  pitch: float               # not commanded; kept for the proprio layout
   v: np.ndarray               # actual body vx, vy, wz
-  ee_b: np.ndarray            # gripper center, body frame
+  ee_b: np.ndarray            # TCP (between the finger pads), body frame
   R_ee_b: np.ndarray          # gripper orientation, body frame (col 0 = approach axis)
   grip: float                 # actual opening 0..1
   grip_closed: bool           # hysteresis state of the command
@@ -105,9 +113,11 @@ class KinBackend:
     self.posture_tau = float(base.get('posture_tau', 0.4))
     self.foot_half = tuple(0.5 * float(x) for x in base.get('footprint', (0.82, 0.44)))
     arm = cfg.get('arm', {})
-    self.shoulder_b = np.asarray(arm.get('mount_xyz', (0.10, 0.0, 0.12)), np.float64)
-    self.reach = float(arm.get('reach', 0.647))
-    self.min_reach = float(arm.get('min_reach', 0.15))
+    mount = np.asarray(arm.get('mount_xyz', (0.10, 0.0, 0.13)), np.float64)
+    self.shoulder_b = mount + [0.0, 0.0, float(arm.get('shoulder_z', SHOULDER_Z))]
+    self.L1 = float(arm.get('upper', UPPER))
+    self.L2 = float(arm.get('fore', FORE))
+    self.tool = float(arm.get('tool', TOOL))
     self.cap = float(cfg.get('manip_base_speed_cap', 0.15))
     self.hl_dt = 1.0 / float(cfg.get('hl_hz', I.HL_HZ))
     self.cams = {}
@@ -122,7 +132,6 @@ class KinBackend:
     vfov = self.cams['head']['model'].vfov_deg
     self.rays = geo.camera_rays(I.DEPTH_W, I.DEPTH_H, hfov, vfov)
     self.h_range = I.NAV_LAYOUT['height'][1:]
-    self.p_range = I.NAV_LAYOUT['pitch'][1:]
     self.scene = None
     self.state = None
     self.dr = DomainRand()
@@ -136,8 +145,8 @@ class KinBackend:
     self.dr = dr or DomainRand()
     x, y, yaw = scene.start
     self.state = KinState(
-        x=float(x), y=float(y), yaw=float(yaw), h=0.45, pitch=0.0, v=np.zeros(3),
-        ee_b=STOW_B.copy(), R_ee_b=R_DEFAULT.copy(), grip=1.0, grip_closed=False,
+        x=float(x), y=float(y), yaw=float(yaw), h=I.BASE_HEIGHT_RANGE[1], pitch=0.0,
+        v=np.zeros(3), ee_b=self.shoulder_b + STOW_REL, R_ee_b=R_STOW.copy(), grip=1.0, grip_closed=False,
         obj_center=scene.obj.center.copy())
     self._static = scene.boxes
     return self.state
@@ -167,49 +176,66 @@ class KinBackend:
     s = s or self.state
     return self.to_world(s.ee_b, s), self.R_body(s) @ s.R_ee_b
 
-  def elbow_b(self, ee_b):
-    v = ee_b - self.shoulder_b
+  def wrist_b(self, ee_b, R_ee_b):
+    return ee_b - self.tool * R_ee_b[:, 0]
+
+  def elbow_b(self, ee_b, R_ee_b=None):
+    """Elbow position (body frame) and (yaw, shoulder pitch, elbow angle)."""
+    R_ee_b = self.state.R_ee_b if R_ee_b is None else R_ee_b
+    v = self.wrist_b(ee_b, R_ee_b) - self.shoulder_b
     psi = math.atan2(v[1], v[0])
     r = math.hypot(v[0], v[1])
-    D = float(np.clip(np.linalg.norm(v), abs(LINK1 - LINK2) + 1e-3, LINK1 + LINK2 - 1e-6))
+    L1, L2 = self.L1, self.L2
+    D = float(np.clip(np.linalg.norm(v), abs(L1 - L2) + 1e-3, L1 + L2 - 1e-6))
     phi = math.atan2(v[2], r)
-    beta = math.acos(np.clip((LINK1 ** 2 + D ** 2 - LINK2 ** 2) / (2 * LINK1 * D), -1, 1))
-    alpha = phi + beta
-    elbow = self.shoulder_b + LINK1 * np.array(
+    beta = math.acos(np.clip((L1 ** 2 + D ** 2 - L2 ** 2) / (2 * L1 * D), -1, 1))
+    alpha = phi + beta                       # elbow up
+    elbow = self.shoulder_b + L1 * np.array(
         [math.cos(alpha) * math.cos(psi), math.cos(alpha) * math.sin(psi), math.sin(alpha)])
-    gamma = math.pi - math.acos(np.clip((LINK1 ** 2 + LINK2 ** 2 - D ** 2) / (2 * LINK1 * LINK2), -1, 1))
+    gamma = math.pi - math.acos(np.clip((L1 ** 2 + L2 ** 2 - D ** 2) / (2 * L1 * L2), -1, 1))
     return elbow, (psi, alpha, gamma)
 
-  def clip_ee(self, ee_b, s):
-    v = ee_b - self.shoulder_b
-    n = float(np.linalg.norm(v))
-    if n > self.reach:
-      v *= self.reach / n
-    elif n < self.min_reach:
-      v = v / max(n, 1e-6) * self.min_reach if n > 1e-6 else np.array([self.min_reach, 0, 0])
-    ee_b = self.shoulder_b + v
-    if abs(ee_b[0]) < BODY_CLEAR[0] and abs(ee_b[1]) < BODY_CLEAR[1] and ee_b[2] < BODY_CLEAR[2]:
-      ee_b = ee_b.copy()
-      ee_b[2] = BODY_CLEAR[2]
-    ee_w = self.to_world(ee_b, s)
-    if ee_w[2] < 0.02:
-      ee_w[2] = 0.02
-      ee_b = self.R_body(s).T @ (ee_w - self.base_pos(s))
-      v = ee_b - self.shoulder_b
+  def clip_ee(self, ee_b, s, R_ee_b=None):
+    """Clips a TCP target so that the wrist stays in the shoulder's reach shell,
+    the TCP stays 2 cm above the ground, and wrist/TCP stay out of the body."""
+    R_ee_b = s.R_ee_b if R_ee_b is None else R_ee_b
+    a = R_ee_b[:, 0]
+    lmax = self.L1 + self.L2 - 1e-3
+    ee_b = np.asarray(ee_b, np.float64).copy()
+    for _ in range(2):
+      v = ee_b - self.tool * a - self.shoulder_b
       n = float(np.linalg.norm(v))
-      if n > self.reach:
-        ee_b = self.shoulder_b + v * self.reach / n
+      if n > lmax:
+        v *= lmax / n
+      elif n < REACH_MIN:
+        v = v / n * REACH_MIN if n > 1e-6 else np.array([REACH_MIN, 0.0, 0.0])
+      ee_b = self.shoulder_b + v + self.tool * a
+      for p in (ee_b, ee_b - self.tool * a):
+        lo, hi = BODY_BOX[:3] - LINK_RADIUS, BODY_BOX[3:] + LINK_RADIUS
+        if np.all(p >= lo) and np.all(p <= hi):
+          ee_b[2] += hi[2] - p[2]
+      ee_w = self.to_world(ee_b, s)
+      if ee_w[2] < 0.02:
+        ee_w[2] = 0.02
+        ee_b = self.R_body(s).T @ (ee_w - self.base_pos(s))
     return ee_b
 
-  def arm_points(self, s=None, n=4):
-    """World points along both links plus the fingertip."""
+  def wrist_cam_b(self, s=None):
     s = s or self.state
-    elbow, _ = self.elbow_b(s.ee_b)
+    return s.ee_b + s.R_ee_b @ self.cams['wrist']['mount']
+
+  def arm_points(self, s=None, n=3):
+    """World points along upper arm, forearm, and wrist-to-TCP, plus the
+    fingertip and the wrist camera."""
+    s = s or self.state
+    elbow, _ = self.elbow_b(s.ee_b, s.R_ee_b)
+    wrist = self.wrist_b(s.ee_b, s.R_ee_b)
     ts = np.linspace(0.0, 1.0, n + 1)[1:, None]
-    seg1 = self.shoulder_b[None] * (1 - ts) + elbow[None] * ts
-    seg2 = elbow[None] * (1 - ts) + s.ee_b[None] * ts
-    tip = s.ee_b + 0.04 * s.R_ee_b[:, 0]
-    pts_b = np.concatenate([seg1, seg2, tip[None]], 0)
+    seg = lambda p, q: p[None] * (1 - ts) + q[None] * ts
+    tip = s.ee_b + 0.02 * s.R_ee_b[:, 0]
+    pts_b = np.concatenate([
+        seg(self.shoulder_b, elbow), seg(elbow, wrist), seg(wrist, s.ee_b),
+        tip[None], self.wrist_cam_b(s)[None]], 0)
     return self.base_pos(s)[None] + pts_b @ self.R_body(s).T
 
   def held_points(self, s=None):
@@ -220,14 +246,19 @@ class KinBackend:
 
   def arm_collides(self, s=None):
     s = s or self.state
-    if geo.points_in_boxes(self.arm_points(s), self._static, LINK_RADIUS).any():
+    pts = self.arm_points(s)
+    if geo.points_in_boxes(pts, self._static, LINK_RADIUS).any():
+      return True
+    # Self collision with the dog body (skip the first upper-arm sample).
+    pts_b = (pts - self.base_pos(s)) @ self.R_body(s)
+    if geo.points_in_boxes(pts_b[1:], BODY_BOX[None], 0.01).any():
       return True
     if s.holding:
-      pts = self.held_points(s)
+      hp = self.held_points(s)
       r = float(self.scene.obj.half[0])
-      if geo.points_in_boxes(pts[:1], self._static, r).any():
+      if geo.points_in_boxes(hp[:1], self._static, r).any():
         return True
-      if geo.points_in_boxes(pts[1:], self._static, 0.0).any() or pts[1, 2] < 0.0:
+      if geo.points_in_boxes(hp[1:], self._static, 0.0).any() or hp[1, 2] < 0.0:
         return True
     return False
 
@@ -238,7 +269,7 @@ class KinBackend:
   # ------------------------------------------------------------------- step
 
   def step(self, cmd):
-    """cmd: dict with skill (int), base (3,) vx vy wz, height, pitch and, for
+    """cmd: dict with skill (int), base (3,) vx vy wz, height and, for
     manipulation skills, dee_pos (3,), dee_rot (3,), grip (scalar 0..1).
 
     Returns a dict of events for this high-level step."""
@@ -262,7 +293,6 @@ class KinBackend:
     # Base and posture.
     base_cmd = np.asarray(cmd['base'], np.float64) * self.dr.vel_scale
     h_cmd = float(np.clip(cmd['height'], *self.h_range))
-    p_cmd = float(np.clip(cmd['pitch'], *self.p_range))
     dt = self.hl_dt / KIN_SUBSTEPS
     av = 1 - math.exp(-dt / self.vel_tau)
     ap = 1 - math.exp(-dt / self.posture_tau)
@@ -274,7 +304,6 @@ class KinBackend:
       s.y += (sn * s.v[0] + c * s.v[1]) * dt
       s.yaw = (s.yaw + s.v[2] * dt + math.pi) % (2 * math.pi) - math.pi
       s.h += (h_cmd - s.h) * ap
-      s.pitch += (p_cmd - s.pitch) * ap
       if self.base_collides(s):
         s.x, s.y, s.yaw = px, py, pyaw
         s.v = np.zeros(3)
@@ -288,11 +317,12 @@ class KinBackend:
       s.R_ee_b = geo.orthonormalize(R_new)
       s.ee_b = self.clip_ee(s.ee_b + dee_pos, s)
     else:
-      target = CARRY_B if s.holding else STOW_B
+      target = self.shoulder_b + (CARRY_REL if s.holding else STOW_REL)
       d = target - s.ee_b
       n = float(np.linalg.norm(d))
       s.ee_b = s.ee_b + (d if n <= ARM_SPEED_NAV else d * ARM_SPEED_NAV / n)
-      rv = geo.log_rot(R_DEFAULT @ s.R_ee_b.T)
+      R_target = R_DEFAULT if s.holding else R_STOW
+      rv = geo.log_rot(R_target @ s.R_ee_b.T)
       ang = float(np.linalg.norm(rv))
       if ang > ARM_ROT_NAV:
         rv *= ARM_ROT_NAV / ang
@@ -345,10 +375,11 @@ class KinBackend:
     ev['grasp_attempt'] = True
     approach = R[:, 0]
     ok_dist = dist < GRASP_TOL + float(obj.half[0])
+    ok_width = 2 * float(obj.half[0]) < GRIP_MAX_WIDTH - 0.005
     cos = scenes.APPROACH_DIRS[self.scene.approach] @ (-approach)
     ok_dir = bool((cos > math.cos(GRASP_ANGLE)).any())
     ok_free = not self.arm_collides(s)
-    if ok_dist and ok_dir and ok_free and self.rng.random() < GRASP_P:
+    if ok_dist and ok_width and ok_dir and ok_free and self.rng.random() < GRASP_P:
       s.holding = s.picked = True
       s.obj_offset = R.T @ (s.obj_center - p)
       ev['grasp_success'] = True
@@ -401,7 +432,7 @@ class KinBackend:
     boxes = np.concatenate([self._static, obox], 0)
     if name == 'head':
       pts = self.arm_points(s)
-      r = 0.035
+      r = 0.04
       boxes = np.concatenate([boxes, np.concatenate([pts - r, pts + r], 1)], 0)
     boxes = boxes[geo.boxes_in_front(pos, R[:, 0], boxes)]
     t = np.minimum(geo.ray_boxes(pos, dirs, boxes), geo.ray_floor(pos, dirs))
@@ -431,8 +462,8 @@ class KinBackend:
     out[L['g_proj']] = R.T @ np.array([0.0, 0.0, -1.0])
     out[L['base_height']] = s.h
     out[L['base_pitch']] = s.pitch
-    _, (psi, alpha, gamma) = self.elbow_b(s.ee_b)
-    out[L['q_arm']] = [psi, alpha, gamma, *geo.log_rot(s.R_ee_b @ R_DEFAULT.T)]
+    _, (psi, alpha, gamma) = self.elbow_b(s.ee_b, s.R_ee_b)
+    out[L['q_arm']] = [psi, alpha, gamma, *geo.log_rot(s.R_ee_b @ R_STOW.T)]
     out[L['ee_pos_b']] = s.ee_b
     out[L['ee_rot6d_b']] = s.R_ee_b[:, :2].T.reshape(-1)
     out[L['grip_width']] = s.grip

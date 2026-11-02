@@ -106,8 +106,7 @@ class LegMMEnv(embodied.Env):
     if skill == I.Skill.NAV:
       ph = I.scale_action(vec, I.NAV_LAYOUT)
       base = np.concatenate([ph['vx'], ph['vy'], ph['wz']])
-      return dict(skill=int(skill), base=base, height=float(ph['height'][0]),
-                  pitch=float(ph['pitch'][0]))
+      return dict(skill=int(skill), base=base, height=float(ph['height'][0]))
     ph = I.scale_action(vec, I.MANIP_LAYOUT)
     base = ph['base_adj'].astype(np.float64).copy()
     base[2] *= 2.0
@@ -115,8 +114,7 @@ class LegMMEnv(embodied.Env):
     if speed > self.cap:
       base[:2] *= self.cap / speed
     return dict(skill=int(skill), base=base, height=float(ph['height'][0]),
-                pitch=float(ph['pitch'][0]), dee_pos=ph['dee_pos'],
-                dee_rot=ph['dee_rot'], grip=float(ph['grip'][0]))
+                dee_pos=ph['dee_pos'], dee_rot=ph['dee_rot'], grip=float(ph['grip'][0]))
 
   def _termination(self, ev):
     s = self.backend.state

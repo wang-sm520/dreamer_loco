@@ -5,7 +5,7 @@ import pytest
 
 from embodied.envs.legmm import interfaces as I
 from embodied.envs.legmm import kin_backend
-from legmm_utils import make_env, random_action, zero_action
+from legmm_utils import height_action, make_env, random_action, zero_action
 
 
 def test_mask_roundtrip_env():
@@ -80,21 +80,19 @@ def _teleport_to_grasp(env):
   c = s.obj_center
   s.x, s.y = c[0] + 0.45 * d[0], c[1] + 0.45 * d[1]
   s.yaw = math.atan2(-d[1], -d[0])
-  s.h = float(np.clip(c[2] - 0.02, 0.25, 0.55))
-  s.pitch = 0.0
+  s.h = float(np.clip(c[2] - 0.05, *I.BASE_HEIGHT_RANGE))
   R_body = b.R_body()
   a_b = R_body.T @ (-d)
   y_b = np.cross([0, 0, 1.0], a_b)
   y_b /= np.linalg.norm(y_b)
   s.R_ee_b = np.stack([a_b, y_b, np.cross(a_b, y_b)], 1)
   s.ee_b = b.clip_ee(R_body.T @ (c - b.base_pos()), s)
-  assert np.linalg.norm(b.ee_world()[0] - c) < 0.02
+  assert np.linalg.norm(b.ee_world()[0] - c) < 0.02, (b.ee_world()[0], c)
   return s
 
 
-def _hold_posture(act, h, pitch=0.0):
-  act['pick'][10] = (h - 0.40) / 0.15
-  act['pick'][11] = 2 * (pitch + 0.45) / 0.62 - 1
+def _hold_posture(act, h):
+  act['pick'][10] = height_action(h)
   return act
 
 
@@ -136,6 +134,6 @@ def test_potential_shaping_rewards_progress():
   env._prev_state = b.step_state({})
   fwd = zero_action(skill=0)
   fwd['nav'][0] = 0.5          # 0.4 m/s
-  fwd['nav'][3] = (0.45 - 0.40) / 0.15
+  fwd['nav'][3] = height_action(env.backend.state.h)
   rewards = [float(env.step(fwd)['reward']) for _ in range(5)]
   assert sum(rewards) > 0

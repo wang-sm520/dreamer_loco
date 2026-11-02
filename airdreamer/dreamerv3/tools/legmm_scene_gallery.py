@@ -32,8 +32,7 @@ def demo_pose(backend, scene):
       yaw = math.atan2(-d[1], -d[0])
       if scenes.footprint_free(scene.boxes, x, y, yaw):
         s.x, s.y, s.yaw = x, y, yaw
-        low = obj.center[2] < 0.3
-        s.h, s.pitch = (0.30, -0.3) if low else (0.45, 0.0)
+        s.h = float(np.clip(obj.center[2] - 0.05, *I.BASE_HEIGHT_RANGE))
         target_w = obj.center + 0.12 * np.array([d[0], d[1], 0.0])
         s.ee_b = backend.clip_ee(backend.R_body().T @ (target_w - backend.base_pos()), s)
         return True
@@ -60,9 +59,9 @@ def main():
           break
   fig, axes = plt.subplots(len(rows), 3, figsize=(9, 2.6 * len(rows)))
   for r, sc in enumerate(rows):
-    b = kin_backend.KinBackend({'camera_head': {'mount_xyz': (0.30, 0, 0.10), 'mount_pitch_deg': -15.0},
-                                'camera_wrist': {'mount_xyz': (-0.08, 0, 0.06), 'mount_pitch_deg': -30.0,
-                                                 'max_z': 2.0}})
+    sys.path.insert(0, str(ROOT / 'tests' / 'legmm'))
+    from legmm_utils import env_cfg
+    b = kin_backend.KinBackend(env_cfg())
     b.reset(sc, np.random.default_rng(0))
     demo_pose(b, sc)
     viz.topdown(axes[r, 0], sc, b.state, b)

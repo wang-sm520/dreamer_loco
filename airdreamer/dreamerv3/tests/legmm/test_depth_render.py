@@ -36,7 +36,7 @@ def test_head_depth_pixel_values(dist):
   cfg['camera_head'] = dict(cfg['camera_head'], mount_pitch_deg=0.0, mount_xyz=(0.30, 0.0, 0.10))
   b = kin_backend.KinBackend(cfg)
   b.reset(wall_scene(dist + 0.30), np.random.default_rng(0))
-  b.state.h, b.state.pitch = 0.45, 0.0
+  b.state.h = 0.35
   z = b.render_true('head')
   # The center row looks straight at the wall face; the arm is stowed above.
   center = z[I.DEPTH_H // 2 - 2: I.DEPTH_H // 2 + 2, I.DEPTH_W // 2 - 2: I.DEPTH_W // 2 + 2]
@@ -62,6 +62,8 @@ def test_arm_occludes_head_camera():
   b = kin_backend.KinBackend(cfg)
   b.reset(wall_scene(3.0), np.random.default_rng(0))
   free = b.render_true('head')
-  b.state.ee_b = b.clip_ee(np.array([0.75, 0.0, 0.10]), b.state)
+  # Reach forward and down in front of the head camera.
+  b.state.R_ee_b = geo.rot_pitch(math.radians(-45))
+  b.state.ee_b = b.clip_ee(b.shoulder_b + np.array([0.75, 0.0, -0.20]), b.state)
   occluded = b.render_true('head')
   assert (occluded < free - 0.5).mean() > 0.01

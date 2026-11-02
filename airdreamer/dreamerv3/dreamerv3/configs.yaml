@@ -296,13 +296,20 @@ defaults:
       use_seed: True
       room_size: [8.0, 8.0]
       n_obstacles: [3, 8]
-      object: {size: [0.04, 0.08], mass: [0.05, 0.8]}   # AIRBOT Play rated payload 1.5 kg
+      object: {size: [0.04, 0.07], mass: [0.05, 0.8]}   # width < 0.08 m gripper stroke; AIRBOT Play rated payload 1.5 kg
       max_failed_grasps: 3
-      camera_head:  {model: d435i, min_z: 0.28, max_z: 6.0, mount_xyz: [0.30, 0.0, 0.10], mount_pitch_deg: -15.0}  # TODO(calibrate)
-      camera_wrist: {model: d435i, min_z: 0.28, max_z: 2.0, mount_xyz: [-0.08, 0.0, 0.06], mount_pitch_deg: -30.0}  # gripper frame; set back so the object stays >= min_z at pre-grasp. Pitch sign as camera_head: negative = tilted down (legmm.yaml had +30). TODO(calibrate)
+      # Head D435i at the A2's original front camera: lens module center in the
+      # base_link mesh at (0.345, 0, 0.08), facing forward (unitree_a2/xmls/assets/base_link.STL).
+      camera_head:  {model: d435i, min_z: 0.28, max_z: 6.0, mount_xyz: [0.35, 0.0, 0.08], mount_pitch_deg: 0.0}  # min_z TODO(calibrate)
+      # Wrist camera on the AIRBOT camera stand, in the TCP frame (x = approach
+      # axis, z = stand side), from depth-mani/airbot_rl/assets/meshes/airbot_play/camera_stand.obj:
+      # 0.127 m behind the TCP, 0.112 m off-axis, tilted 31.6 deg towards the gripper axis.
+      camera_wrist: {model: d435i, min_z: 0.28, max_z: 2.0, mount_xyz: [-0.127, 0.0, 0.1115], mount_pitch_deg: -31.6}  # model/min_z TODO(calibrate)
       obs_depth_dtype: uint8       # legmm.yaml: depth_dtype (renamed, see NOTE above)
       goal_provider: {type: gt_noisy, pos_sigma: 0.03, yaw_sigma: 0.1, latency_steps: [0, 2], dropout: 0.05}  # simulated RGB teacher
-      arm: {mount_xyz: [0.10, 0.0, 0.12], reach: 0.647, min_reach: 0.15, payload: 1.5}   # AIRBOT Play; mount TODO(calibrate)
+      # AIRBOT Play chain (depth-mani/airbot_rl/assets/airbot_play.xml). mount_xyz =
+      # arm_base on the A2 back in base_link coordinates: TODO(calibrate), not yet given.
+      arm: {mount_xyz: [0.10, 0.0, 0.13], shoulder_z: 0.1172, upper: 0.27009, fore: 0.29015, tool: 0.241, payload: 1.5}
       base: {footprint: [0.82, 0.44], vel_tau: 0.15, posture_tau: 0.4}   # first-order lag in the kin backend
       manip_base_speed_cap: 0.15
       reward: {w_nav: 2.0, w_ee: 3.0, r_grasp: 10.0, r_place: 20.0, r_failed_grasp: -1.0, r_drop: -10.0,

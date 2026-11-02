@@ -40,24 +40,29 @@ NUM_SKILLS = len(Skill)
 
 # 每个技能一个动作 key（= 策略的一个输出头；DreamerV3 MLPHead 天然为每个 key 建独立输出层）
 # 布局：name -> (slice, low_phys, high_phys)，策略输出 [-1,1] 线性映射到物理量
+# Body height command: base_link origin height above ground. Range = belly on
+# the ground (base mesh bottom is 0.078 m below the origin, unitree_a2/xmls/a2.xml)
+# up to the default standing pose (thigh 0.9, calf -1.8, 0.275 m links, 0.032 m
+# foot radius -> 0.374 m; unitree_rl_mjlab a2_constants.INIT_STATE).
+# Pitch is not commanded (user decision 2026-11-02).
+BASE_HEIGHT_RANGE = (0.08, 0.374)
+
 NAV_LAYOUT = {
     'vx':        (slice(0, 1), -0.8, 0.8),     # m/s
     'vy':        (slice(1, 2), -0.4, 0.4),     # m/s
     'wz':        (slice(2, 3), -1.0, 1.0),     # rad/s
-    'height':    (slice(3, 4), 0.25, 0.55),    # m, 机身高度指令  TODO(calibrate): A2 可达范围（趴下 → 正常站立）
-    'pitch':     (slice(4, 5), -0.45, 0.17),   # rad, 机身俯仰（负=低头）TODO(calibrate)
+    'height':    (slice(3, 4), *BASE_HEIGHT_RANGE),   # m, body height command
 }
-NAV_DIM = 5
+NAV_DIM = 4
 
 MANIP_LAYOUT = {  # PICK 与 PLACE 共享布局，但是两个独立的头/动作 key
     'dee_pos':   (slice(0, 3), -0.05, 0.05),   # m / 高层步（=0.25 m/s），末端位置增量（机体系）
     'dee_rot':   (slice(3, 6), -0.30, 0.30),   # rad / 高层步，轴角增量
     'grip':      (slice(6, 7), 0.0, 1.0),      # 目标开度（0=闭合, 1=全开）
     'base_adj':  (slice(7, 10), -0.15, 0.15),  # vx, vy (m/s), wz 共用同一缩放（wz 实际 ×2）
-    'height':    (slice(10, 11), 0.25, 0.55),  # 同 NAV  TODO(calibrate)
-    'pitch':     (slice(11, 12), -0.45, 0.17), # 同 NAV  TODO(calibrate)
+    'height':    (slice(10, 11), *BASE_HEIGHT_RANGE),  # 同 NAV
 }
-MANIP_DIM = 12
+MANIP_DIM = 11
 
 SKILL_ACTION_KEY = {Skill.NAV: 'nav', Skill.PICK: 'pick', Skill.PLACE: 'place'}
 ACTION_DIMS = {'nav': NAV_DIM, 'pick': MANIP_DIM, 'place': MANIP_DIM}

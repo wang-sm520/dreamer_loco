@@ -32,8 +32,7 @@ def pregrasp(b, sc):
       if not scenes.footprint_free(sc.boxes, x, y, yaw):
         continue
       s.x, s.y, s.yaw = x, y, yaw
-      s.h = float(np.clip(c[2] + 0.05, 0.25, 0.55))
-      s.pitch = -0.3 if c[2] < 0.3 else 0.0
+      s.h = float(np.clip(c[2] - 0.05, *I.BASE_HEIGHT_RANGE))
       R = b.R_body()
       a_b = R.T @ (-d)
       y_b = np.cross([0, 0, 1.0], a_b); y_b /= np.linalg.norm(y_b)
@@ -68,22 +67,35 @@ def main():
     min_z = b.cams['head']['model'].min_z
     head_invalid = float((with_arm < min_z).mean())
     pos, R = b.camera_pose('wrist')
-    obj_z = float((b.state.obj_center - pos) @ R[:, 0])
+    pre_z = float((b.state.obj_center - pos) @ R[:, 0])
     wrist = b.render_true('wrist')
+    # Same at grasp: TCP on the object center.
+    d = b.state.obj_center - b.ee_world()[0]
+    b.state.ee_b = b.state.ee_b + b.R_body().T @ d
+    pos2, R2 = b.camera_pose('wrist')
+    grasp_z = float((b.state.obj_center - pos2) @ R2[:, 0])
     rows.append(dict(seed=seed, type=int(sc.scene_type), head_arm_occluded=occl,
-                     head_below_min_z=head_invalid, wrist_obj_zdepth=obj_z,
+                     head_below_min_z=head_invalid, wrist_obj_zdepth=pre_z,
+                     wrist_obj_zdepth_grasp=grasp_z,
                      wrist_below_min_z=float((wrist < b.cams['wrist']['model'].min_z).mean())))
     if len(rows) >= a.n:
       break
   arr = lambda k: np.array([r[k] for r in rows])
+  pre, grasp = arr('wrist_obj_zdepth'), arr('wrist_obj_zdepth_grasp')
+  # Candidate min_z values (approximate datasheet figures, to be measured):
+  # D435i 1280x720 0.28, 848x480 ~0.195, 424x240 ~0.105; D405 ~0.07.
+  cands = {'0.28': 0.28, '0.195': 0.195, '0.105': 0.105, '0.07': 0.07}
   res = dict(
       n=len(rows),
       head_arm_occluded_mean=float(arr('head_arm_occluded').mean()),
       head_below_min_z_mean=float(arr('head_below_min_z').mean()),
-      wrist_obj_zdepth_median=float(np.median(arr('wrist_obj_zdepth'))),
-      wrist_obj_below_min_z_frac=float((arr('wrist_obj_zdepth') < cfg['camera_wrist']['min_z']).mean()),
+      wrist_obj_zdepth_pregrasp_median=float(np.median(pre)),
+      wrist_obj_zdepth_grasp_median=float(np.median(grasp)),
+      wrist_obj_zdepth_grasp_minmax=[float(grasp.min()), float(grasp.max())],
+      pregrasp_obj_below_min_z_frac={k: float((pre < v).mean()) for k, v in cands.items()},
+      grasp_obj_below_min_z_frac={k: float((grasp < v).mean()) for k, v in cands.items()},
       wrist_below_min_z_mean=float(arr('wrist_below_min_z').mean()),
-      config=dict(arm_mount=cfg['arm']['mount_xyz'], head=cfg['camera_head'], wrist=cfg['camera_wrist']))
+      config=dict(arm=cfg['arm'], head=cfg['camera_head'], wrist=cfg['camera_wrist']))
   print(json.dumps(res, indent=1, default=list))
   if a.out:
     pathlib.Path(a.out).write_text(json.dumps(dict(summary=res, rows=rows), indent=1, default=list))

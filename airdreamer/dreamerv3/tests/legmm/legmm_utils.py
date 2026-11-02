@@ -50,3 +50,9 @@ def wall_scene(dist, room=(8.0, 8.0)):
   zone = scenes.PlaceZone(np.array([-3.0, -3.0]), np.array([0.175, 0.175]), 0.0)
   return scenes.Scene('train', 0, 0, np.asarray(room), boxes, ('obstacle',), obj, zone,
                       np.array([0.0, 0.0, 0.0]), np.ones(9, bool))
+
+
+def height_action(h):
+  """Normalized action value for a body height command."""
+  lo, hi = I.BASE_HEIGHT_RANGE
+  return float(np.clip(2 * (h - lo) / (hi - lo) - 1, -1, 1))

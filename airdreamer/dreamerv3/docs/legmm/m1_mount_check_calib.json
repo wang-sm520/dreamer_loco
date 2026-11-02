@@ -1,0 +1,514 @@
+{
+ "summary": {
+  "n": 50,
+  "head_arm_occluded_mean": 0.018479166666666668,
+  "head_below_min_z_mean": 0.9470520833333333,
+  "wrist_obj_zdepth_pregrasp_median": 0.2517664425661356,
+  "wrist_obj_zdepth_grasp_median": 0.1665937491518309,
+  "wrist_obj_zdepth_grasp_minmax": [
+   0.1665937491518307,
+   0.1665937491518311
+  ],
+  "pregrasp_obj_below_min_z_frac": {
+   "0.28": 1.0,
+   "0.195": 0.0,
+   "0.105": 0.0,
+   "0.07": 0.0
+  },
+  "grasp_obj_below_min_z_frac": {
+   "0.28": 1.0,
+   "0.195": 1.0,
+   "0.105": 0.0,
+   "0.07": 0.0
+  },
+  "wrist_below_min_z_mean": 0.4211145833333334,
+  "config": {
+   "arm": {
+    "mount_xyz": [
+     0.1,
+     0.0,
+     0.13
+    ],
+    "shoulder_z": 0.1172,
+    "upper": 0.27009,
+    "fore": 0.29015,
+    "tool": 0.241,
+    "payload": 1.5
+   },
+   "head": {
+    "model": "d435i",
+    "min_z": 0.28,
+    "max_z": 6.0,
+    "mount_xyz": [
+     0.35,
+     0.0,
+     0.08
+    ],
+    "mount_pitch_deg": 0.0
+   },
+   "wrist": {
+    "model": "d435i",
+    "min_z": 0.28,
+    "max_z": 2.0,
+    "mount_xyz": [
+     -0.127,
+     0.0,
+     0.1115
+    ],
+    "mount_pitch_deg": -31.6
+   }
+  }
+ },
+ "rows": [
+  {
+   "seed": 0,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.4796875
+  },
+  {
+   "seed": 1,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661357,
+   "wrist_obj_zdepth_grasp": 0.16659374915183095,
+   "wrist_below_min_z": 0.41744791666666664
+  },
+  {
+   "seed": 4,
+   "type": 0,
+   "head_arm_occluded": 0.12291666666666666,
+   "head_below_min_z": 0.5950520833333334,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.2799479166666667
+  },
+  {
+   "seed": 5,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.4078125
+  },
+  {
+   "seed": 9,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.42890625
+  },
+  {
+   "seed": 10,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.34453125
+  },
+  {
+   "seed": 11,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.41875
+  },
+  {
+   "seed": 12,
+   "type": 1,
+   "head_arm_occluded": 0.08541666666666667,
+   "head_below_min_z": 0.7036458333333333,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.37916666666666665
+  },
+  {
+   "seed": 14,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613556,
+   "wrist_obj_zdepth_grasp": 0.1665937491518311,
+   "wrist_below_min_z": 0.48515625
+  },
+  {
+   "seed": 15,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.39505208333333336
+  },
+  {
+   "seed": 16,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613556,
+   "wrist_obj_zdepth_grasp": 0.1665937491518311,
+   "wrist_below_min_z": 0.36354166666666665
+  },
+  {
+   "seed": 19,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.42083333333333334
+  },
+  {
+   "seed": 20,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.3572916666666667
+  },
+  {
+   "seed": 21,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.3033854166666667
+  },
+  {
+   "seed": 23,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.42083333333333334
+  },
+  {
+   "seed": 24,
+   "type": 1,
+   "head_arm_occluded": 0.13854166666666667,
+   "head_below_min_z": 0.7192708333333333,
+   "wrist_obj_zdepth": 0.2546077930106434,
+   "wrist_obj_zdepth_grasp": 0.1665937491518311,
+   "wrist_below_min_z": 0.44583333333333336
+  },
+  {
+   "seed": 25,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613556,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.28411458333333334
+  },
+  {
+   "seed": 28,
+   "type": 1,
+   "head_arm_occluded": 0.11927083333333334,
+   "head_below_min_z": 0.5924479166666666,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.30703125
+  },
+  {
+   "seed": 29,
+   "type": 2,
+   "head_arm_occluded": 0.00625,
+   "head_below_min_z": 0.9625,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.50625
+  },
+  {
+   "seed": 30,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.3502604166666667
+  },
+  {
+   "seed": 31,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613556,
+   "wrist_obj_zdepth_grasp": 0.1665937491518311,
+   "wrist_below_min_z": 0.35572916666666665
+  },
+  {
+   "seed": 32,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.40208333333333335
+  },
+  {
+   "seed": 33,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.4828125
+  },
+  {
+   "seed": 36,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.49635416666666665
+  },
+  {
+   "seed": 37,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.5203125
+  },
+  {
+   "seed": 38,
+   "type": 1,
+   "head_arm_occluded": 0.13854166666666667,
+   "head_below_min_z": 0.7450520833333333,
+   "wrist_obj_zdepth": 0.25970389818173056,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4609375
+  },
+  {
+   "seed": 39,
+   "type": 2,
+   "head_arm_occluded": 0.07291666666666667,
+   "head_below_min_z": 0.9270833333333334,
+   "wrist_obj_zdepth": 0.25392693042454245,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4817708333333333
+  },
+  {
+   "seed": 41,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4640625
+  },
+  {
+   "seed": 42,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518311,
+   "wrist_below_min_z": 0.39947916666666666
+  },
+  {
+   "seed": 43,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.4630208333333333
+  },
+  {
+   "seed": 44,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 0.95,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4015625
+  },
+  {
+   "seed": 45,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.5130208333333334
+  },
+  {
+   "seed": 46,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661357,
+   "wrist_obj_zdepth_grasp": 0.16659374915183095,
+   "wrist_below_min_z": 0.3697916666666667
+  },
+  {
+   "seed": 47,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.5111979166666667
+  },
+  {
+   "seed": 48,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 0.775,
+   "wrist_obj_zdepth": 0.2517664425661355,
+   "wrist_obj_zdepth_grasp": 0.1665937491518308,
+   "wrist_below_min_z": 0.4088541666666667
+  },
+  {
+   "seed": 52,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4359375
+  },
+  {
+   "seed": 53,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.16659374915183087,
+   "wrist_below_min_z": 0.40390625
+  },
+  {
+   "seed": 58,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4276041666666667
+  },
+  {
+   "seed": 59,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.5036458333333333
+  },
+  {
+   "seed": 61,
+   "type": 2,
+   "head_arm_occluded": 0.115625,
+   "head_below_min_z": 0.7736979166666667,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.5674479166666667
+  },
+  {
+   "seed": 63,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4856770833333333
+  },
+  {
+   "seed": 64,
+   "type": 0,
+   "head_arm_occluded": 0.12447916666666667,
+   "head_below_min_z": 0.6088541666666667,
+   "wrist_obj_zdepth": 0.2517664425661359,
+   "wrist_obj_zdepth_grasp": 0.1665937491518307,
+   "wrist_below_min_z": 0.37864583333333335
+  },
+  {
+   "seed": 65,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613556,
+   "wrist_obj_zdepth_grasp": 0.1665937491518311,
+   "wrist_below_min_z": 0.4109375
+  },
+  {
+   "seed": 66,
+   "type": 1,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613556,
+   "wrist_obj_zdepth_grasp": 0.1665937491518311,
+   "wrist_below_min_z": 0.4322916666666667
+  },
+  {
+   "seed": 67,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4270833333333333
+  },
+  {
+   "seed": 68,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.44140625
+  },
+  {
+   "seed": 69,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613573,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4822916666666667
+  },
+  {
+   "seed": 70,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.25176644256613556,
+   "wrist_obj_zdepth_grasp": 0.1665937491518311,
+   "wrist_below_min_z": 0.3807291666666667
+  },
+  {
+   "seed": 71,
+   "type": 2,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.16659374915183098,
+   "wrist_below_min_z": 0.25286458333333334
+  },
+  {
+   "seed": 72,
+   "type": 0,
+   "head_arm_occluded": 0.0,
+   "head_below_min_z": 1.0,
+   "wrist_obj_zdepth": 0.2517664425661356,
+   "wrist_obj_zdepth_grasp": 0.1665937491518309,
+   "wrist_below_min_z": 0.4984375
+  }
+ ]
+}
