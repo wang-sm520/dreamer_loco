@@ -120,34 +120,34 @@ def _line_free(p0, p1, boxes, margin=0.02, skip_end=0.06):
   return not geo.points_in_boxes(pts, boxes, margin).any()
 
 
+GEOM_SLACK = 0.10   # matches the base_adj offsets the rollouts may use
+
+
 def aff_geom_pick(backend, scene, max_angle=math.radians(60.0)):
-  """Heuristic: the object is inside the reach shell for some body height, a
-  free approach direction points within 60 deg of the robot, and the straight
-  line from the shoulder to the object is collision-free."""
+  """Geometric heuristic (no rollouts): some free approach direction within
+  60 deg of the robot admits a body height that puts the wrist center inside
+  the reach shell for pre-grasp and grasp, and neither the TCP nor the wrist
+  center lies inside an obstacle."""
   s = backend.state
   if s.holding or s.placed:
     return 0.0
   obj = s.obj_center
+  base = (s.x, s.y, s.yaw)
   sh_w = backend.to_world(backend.shoulder_b)
   to_robot = sh_w[:2] - obj[:2]
-  n = np.linalg.norm(to_robot)
-  if n < 1e-6:
-    return 0.0
-  to_robot /= n
-  free = np.where(scene.approach[:scenes.N_DIRS])[0]
-  ok_dir = any(scenes.APPROACH_DIRS[i][:2] @ to_robot > math.cos(max_angle) for i in free)
-  ok_dir = ok_dir or bool(scene.approach[scenes.N_DIRS])
-  L = backend.L1 + backend.L2 + backend.tool
-  best = None
-  for h in np.linspace(*I.BASE_HEIGHT_RANGE, 6):
-    sh = sh_w.copy()
-    sh[2] += h - s.h
-    if np.linalg.norm(obj - sh) <= L:
-      best = sh
-      break
-  if best is None or not ok_dir:
-    return 0.0
-  return float(_line_free(best, obj, scene.boxes))
+  to_robot /= max(np.linalg.norm(to_robot), 1e-6)
+  for i, _, axes in ex.approach_options(scene, s.yaw):
+    if i < scenes.N_DIRS and scenes.APPROACH_DIRS[i][:2] @ to_robot < math.cos(max_angle):
+      continue
+    for _, a in axes:
+      R_w = ex.grasp_frame(a, s.yaw)
+      pre, goal, _ = ex.pick_targets(obj, a, i == scenes.N_DIRS)
+      if ex.height_range(backend, base, (pre, goal), R_w, GEOM_SLACK) is None:
+        continue
+      pts = np.stack([goal, goal - backend.tool * a])
+      if not geo.points_in_boxes(pts, scene.boxes, 0.02).any():
+        return 1.0
+  return 0.0
 
 
 def aff_geom_place(backend, scene):
@@ -155,12 +155,24 @@ def aff_geom_place(backend, scene):
   if not s.holding:
     return 0.0
   zone = scene.place
-  target = np.array([*zone.center, zone.support_z + scene.obj.half[2] + 0.01])
   sh_w = backend.to_world(backend.shoulder_b)
-  L = backend.L1 + backend.L2 + backend.tool
-  for h in np.linspace(*I.BASE_HEIGHT_RANGE, 6):
-    sh = sh_w.copy()
-    sh[2] += h - s.h
-    if np.linalg.norm(target - sh) <= L:
-      return float(_line_free(sh, target, scene.boxes))
+  # Release point shifted 0.10 m towards the robot, inside the zone (as planned).
+  toward = sh_w[:2] - zone.center
+  toward /= max(np.linalg.norm(toward), 1e-6)
+  r_obj = float(scene.obj.half[0])
+  xy = np.clip(zone.center + 0.10 * toward, zone.center - zone.half + r_obj,
+               zone.center + zone.half - r_obj)
+  target = np.array([*xy, zone.support_z + scene.obj.half[2] + 0.022])
+  base = (s.x, s.y, s.yaw)
+  heading = math.atan2(target[1] - sh_w[1], target[0] - sh_w[0])
+  if abs(math.atan2(math.sin(heading - s.yaw), math.cos(heading - s.yaw))) > math.radians(90):
+    return 0.0
+  for pitch in ex.PLACE_PITCHES:
+    R_w = geo.rot_z(heading) @ geo.rot_pitch(-pitch)
+    goal = target - R_w @ s.obj_offset
+    if ex.height_range(backend, base, (goal + [0, 0, 0.08], goal), R_w, GEOM_SLACK) is None:
+      continue
+    pts = np.stack([goal, goal - backend.tool * R_w[:, 0]])
+    if not geo.points_in_boxes(pts, scene.boxes, 0.02).any():
+      return 1.0
   return 0.0

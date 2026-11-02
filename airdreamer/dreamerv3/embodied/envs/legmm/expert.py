@@ -98,14 +98,15 @@ def tcp_feasible(backend, base, h, tcp_w, R_w, holding=False, obj_offset=None):
   return not backend.arm_collides(s, PLAN_MARGIN)
 
 
-def height_range(backend, base, pts_w, R_w):
-  """Body heights for which the wrist centers of all TCP poses are in reach."""
+def height_range(backend, base, pts_w, R_w, slack=0.0):
+  """Body heights for which the wrist centers of all TCP poses are in reach
+  (reach extended by slack, e.g. to account for small base adjustments)."""
   x, y, yaw = base
   a = R_w[:, 0]
   sh = backend.shoulder_b
   c, sn = math.cos(yaw), math.sin(yaw)
   sx, sy = x + c * sh[0] - sn * sh[1], y + sn * sh[0] + c * sh[1]
-  L = backend.L1 + backend.L2 - 0.01
+  L = backend.L1 + backend.L2 - 0.01 + slack
   lo, hi = H_MIN, H_MAX
   for p in pts_w:
     w = np.asarray(p) - backend.tool * a
@@ -534,7 +535,8 @@ class ScriptedExpert:
       if self.rng.random() < self.cfg.p_bad_pose:
         plan = self._make_bad(plan, cands)
         plan.way_w = self._transit(plan) or plan.way_w
-        stage = self._staging(plan, planner) or stage
+        bad_stage = self._staging(plan, planner)
+        stage = bad_stage if bad_stage is not None else stage
       elif self.rng.random() < self.cfg.p_early_switch:
         self.early_at = self.rng.uniform(0.4, 1.2)
         self.stats['early_switch'] += 1
