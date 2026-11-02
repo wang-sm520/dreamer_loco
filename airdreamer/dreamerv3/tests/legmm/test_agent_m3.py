@@ -122,6 +122,31 @@ def test_aff_loss_masked():
   assert not np.allclose(base['aff'], valid_losses['aff'])
 
 
+def test_aff_gradient_into_world_model():
+  agent = make_legmm_agent(train_phase='wm')
+  batch = _set_clean_sequence(agent, _random_batch(agent, seed=11))
+  data = jax.tree.map(jax.device_put, batch)
+  carry = agent.init_train(2)
+  params = {
+      k: (v.addressable_data(0) if hasattr(v, 'addressable_data') else v)
+      for k, v in agent.params.items()}
+  apply = nj.pure(agent.model._apply_replay_context)
+  state, (carry3, obs, prevact, _) = apply(params, carry, data, seed=0)
+
+  def aff_loss(carry, obs, prevact, training):
+    return agent.model.loss(carry, obs, prevact, training)[1][2]['losses']['aff'].mean()
+
+  def grad_for(module):
+    def gradloss(*args):
+      return nj.grad(aff_loss, module)(*args)
+    gradfn = nj.pure(gradloss)
+    _, (_, _, grads) = gradfn(state, carry3, obs, prevact, False, seed=0)
+    return sum(float(jnp.abs(x).sum()) for x in jax.tree.leaves(grads))
+
+  assert grad_for(agent.model.enc) > 0
+  assert grad_for(agent.model.dyn) > 0
+
+
 def test_phase_loss():
   agent = make_legmm_agent(train_phase='wm')
   batch = _set_clean_sequence(agent, _random_batch(agent, seed=5))

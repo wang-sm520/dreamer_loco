@@ -5,7 +5,8 @@ import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / 'tools'))
 from legmm_wm_eval import (binary_auroc, depth_mae, ece_equal_width,
-                           phase_accuracy, reward_event_errors)
+                           phase_accuracy, phase_transition_events,
+                           reward_event_errors)
 
 
 def test_auroc_and_ece_numpy_references():
@@ -40,4 +41,25 @@ def test_reward_event_offset_indexing():
   assert result['-1']['count'] == 2
   assert result['0']['mean'] == 1.0
   assert result['1']['count'] == 2
+
+
+def test_phase_events_and_offsets_stay_in_sequence():
+  phase = np.array([
+      [0, 0, 1, 1, 2, 2, 0, 1, 1, 2, 2, 2],
+      [0, 1, 1, 2, 2, 0, 0, 0, 1, 1, 2, 2]], np.int32)
+  first = np.zeros((2, 12), bool)
+  first[:, 0] = True
+  first[1, 5] = True
+  events = phase_transition_events(phase, first)
+  np.testing.assert_array_equal(np.argwhere(events['pick_success']),
+                                [[0, 2], [0, 7], [1, 1], [1, 8]])
+  np.testing.assert_array_equal(np.argwhere(events['place_success']),
+                                [[0, 4], [0, 9], [1, 3], [1, 10]])
+  reward = np.arange(24, dtype=float).reshape(2, 12)
+  predicted = reward + 1
+  result = reward_event_errors(predicted, reward, events['pick_success'],
+                               offsets=(-5, 0, 5), is_first=first)
+  assert result['0']['count'] == 4
+  assert result['-5']['count'] == 1
+  assert result['5']['count'] == 1
 

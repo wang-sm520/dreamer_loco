@@ -55,6 +55,17 @@ def soft_bce_logits(logits, labels):
   return jnp.maximum(logits, jnp.zeros_like(logits)) - logits * labels + jax.nn.softplus(-jnp.abs(logits))
 
 
+def skill_prior_jax(aff_pick, aff_place, p_holding, eps=0.05):
+  """JAX copy of ``embodied.envs.legmm.interfaces.skill_prior``."""
+  not_hold = jnp.stack([1 - aff_pick, aff_pick, jnp.zeros_like(aff_pick)], -1)
+  hold = jnp.stack([1 - aff_place, jnp.zeros_like(aff_place), aff_place], -1)
+  prior = (1 - p_holding)[..., None] * not_hold + p_holding[..., None] * hold
+  return (1 - eps) * prior + eps / 3.0
+
+
+skill_prior_jnp = skill_prior_jax
+
+
 class Agent(embodied.jax.Agent):
 
   banner = [
@@ -98,8 +109,9 @@ class Agent(embodied.jax.Agent):
     self._bc_enabled = bool(config.skill.enabled) and self.train_phase in ('bc', 'rl', 'online') and (
         float(bc_cfg.scale) != 0.0 or float(bc_cfg.scale_end) != 0.0)
     prior_cfg = config.skill_prior
-    self._schedule_enabled = self._bc_enabled or (
+    self._skill_prior_enabled = bool(config.skill.enabled) and (
         float(prior_cfg.scale) != 0.0 or float(prior_cfg.scale_end) != 0.0)
+    self._schedule_enabled = self._bc_enabled or self._skill_prior_enabled
     self.step = (nj.Variable(jnp.array, 0, i32, name='agent_step')
                  if self._schedule_enabled else None)
     
@@ -149,6 +161,10 @@ class Agent(embodied.jax.Agent):
       self.phase = embodied.jax.MLPHead(
           phase_space, output='categorical', **kw, name='phase')
 
+    if self._skill_prior_enabled and (self.aff is None or self.phase is None):
+      raise ValueError(
+          'skill_prior requires both aff_head.enabled and phase_head.enabled')
+
     self.modules = [
         self.dyn, self.enc, self.dec, self.rew, self.con, self.pol, self.val]
     if self.aff is not None:
@@ -185,6 +201,8 @@ class Agent(embodied.jax.Agent):
       scales['phase'] = self.phase_scale
     if self._bc_enabled:
       scales['bc'] = 1.0
+    if self._skill_prior_enabled and self._imag_enabled:
+      scales['skill_prior'] = 1.0
     self.scales = scales
 
   @property
@@ -404,6 +422,16 @@ class Agent(embodied.jax.Agent):
           update=training,
           contdisc=self.config.contdisc,
           horizon=self.config.horizon,
+          skill_key=(self.config.skill.key if self.config.skill.enabled else None),
+          action_keys=(tuple(self.config.skill.action_keys)
+                       if self.config.skill.enabled else ()),
+          switch_cost=(float(self.config.switch_cost)
+                       if self.config.skill.enabled else 0.0),
+          aff=(self.aff(inp, 2) if self._skill_prior_enabled else None),
+          phase=(self.phase(inp, 2) if self._skill_prior_enabled else None),
+          skill_prior_scale=(self.prior_scale()
+                             if self._skill_prior_enabled else None),
+          skill_prior_eps=float(self.config.skill_prior.eps),
           **self.config.imag_loss)
       losses.update({k: v.mean(1).reshape((B, K)) for k, v in los.items()})
       metrics.update(mets)
@@ -452,12 +480,17 @@ class Agent(embodied.jax.Agent):
     out['reward'] = self.rew(inp, 2).pred()
     return out
 
-  def openloop_depth(self, carry, obs, prevact, horizon):
-    """Posterior context followed by recorded-action RSSM imagination."""
+  def openloop_depth(self, carry, obs, prevact, horizon, context=16):
+    """Posterior context followed by recorded-action RSSM imagination.
+
+    The carry before this context is the zero-filled replay entry. Offline
+    chunks contain no stored RSSM latents, so the context is reconstructed from
+    observations and actions before the open-loop rollout begins.
+    """
     enc_carry, dyn_carry, dec_carry = carry
     reset = obs['is_first']
     _, _, tokens = self.enc(enc_carry, obs, reset, training=False)
-    ctx = min(max(int(self.config.replay_context), 1), reset.shape[1])
+    ctx = min(max(int(context), 1), reset.shape[1])
     dyn_carry, _, _ = self.dyn.observe(
         dyn_carry, tokens[:, :ctx], {k: v[:, :ctx] for k, v in prevact.items()},
         reset[:, :ctx], training=False)
@@ -647,9 +680,22 @@ def imag_loss(
     actent=3e-4,
     actsmooth=0.0,
     slowreg=1.0,
+    skill_key=None,
+    action_keys=(),
+    switch_cost=0.0,
+    aff=None,
+    phase=None,
+    skill_prior_scale=None,
+    skill_prior_eps=0.05,
 ):
   losses = {}
   metrics = {}
+
+  # imgact[:, t] is the action taken in imagined state t, while rew[:, t]
+  # arrives at state t.  A switch observed at t therefore penalizes rew[:, t+1].
+  if switch_cost and skill_key in act:
+    sw = (act[skill_key][:, 1:] != act[skill_key][:, :-1]).astype(f32)
+    rew = rew.at[:, 2:].add(-f32(switch_cost) * sw[:, :-1])
 
   voffset, vscale = valnorm.stats()
   val = value.pred() * vscale + voffset
@@ -665,17 +711,73 @@ def imag_loss(
   adv = (ret - tarval[:, :-1]) / rscale
   aoffset, ascale = advnorm(adv, update)
   adv_normed = (adv - aoffset) / ascale
-  logpi = sum([v.logp(sg(act[k]))[:, :-1] for k, v in policy.items()])
   ents = {k: v.entropy()[:, :-1] for k, v in policy.items()}
   smooths = {}
+  if skill_key in act and skill_key in policy:
+    sk = act[skill_key][:, :-1]
+    logpi = policy[skill_key].logp(sg(act[skill_key]))[:, :-1]
+    ent = ents[skill_key]
+    smooth_total = 0
+    for i, k in enumerate(action_keys):
+      if k not in policy or k not in act:
+        continue
+      on = (sk == i).astype(f32)
+      logpi += on * policy[k].logp(sg(act[k]))[:, :-1]
+      ents[k] = on * ents[k]
+      ent += ents[k]
+      mean_k = policy[k].pred()
+      diff = mean_k[:, 1:] - mean_k[:, :-1]
+      smooth = (diff ** 2).sum(axis=tuple(range(2, diff.ndim)))
+      # Smoothness is defined only for a continuous skill's own action head;
+      # both adjacent imagined states must select that skill.
+      both = ((act[skill_key][:, :-1] == i) &
+              (act[skill_key][:, 1:] == i)).astype(f32)
+      smooths[k] = both * smooth
+      smooth_total = smooth_total + smooths[k]
+    # The categorical selector has no smoothness penalty.
+    smooths[skill_key] = jnp.zeros_like(ents[skill_key])
+  else:
+    logpi = sum([v.logp(sg(act[k]))[:, :-1] for k, v in policy.items()])
+    ent = sum(ents.values())
+    smooth_total = 0
+    for k, v in policy.items():
+      mean_k = v.pred()
+      diff = mean_k[:, 1:] - mean_k[:, :-1]
+      smooths[k] = (diff ** 2).sum(axis=tuple(range(2, diff.ndim)))
+    smooth_total = sum(smooths.values())
+
   for k, v in policy.items():
+    if k in smooths:
+      continue
     mean_k = v.pred()
     diff = mean_k[:, 1:] - mean_k[:, :-1]
     smooths[k] = (diff ** 2).sum(axis=tuple(range(2, diff.ndim)))
   policy_loss = sg(weight[:, :-1]) * -(
-      logpi * sg(adv_normed) + actent * sum(ents.values())
-      - actsmooth * sum(smooths.values()))
+      logpi * sg(adv_normed) + actent * ent
+      - actsmooth * smooth_total)
   losses['policy'] = policy_loss
+
+  if skill_prior_scale is not None:
+    if skill_key not in policy or aff is None or phase is None:
+      raise ValueError(
+          'skill_prior requires skill policy, aff head, and phase head outputs')
+    def _field(output, name):
+      if hasattr(output, name):
+        return getattr(output, name)
+      if hasattr(output, 'output') and hasattr(output.output, name):
+        return getattr(output.output, name)
+      return output
+    aff_logits = sg(_field(aff, 'logit'))
+    phase_logits = sg(_field(phase, 'logits'))
+    aff_prob = jax.nn.sigmoid(aff_logits)
+    hold = jax.nn.softmax(phase_logits, -1)[..., 1]
+    prior = skill_prior_jax(
+        aff_prob[..., 0], aff_prob[..., 1], hold, eps=skill_prior_eps)
+    pi_logits = policy[skill_key].logits
+    logpi_skill = jax.nn.log_softmax(pi_logits, -1)
+    pi = jax.nn.softmax(pi_logits, -1)
+    kl = (pi * (logpi_skill - jnp.log(prior))).sum(-1)
+    losses['skill_prior'] = sg(weight[:, :-1]) * kl[:, :-1] * skill_prior_scale
 
   voffset, vscale = valnorm(ret, update)
   tar_normed = (ret - voffset) / vscale
@@ -699,7 +801,12 @@ def imag_loss(
   metrics['ret_max'] = ret_normed.max()
   metrics['ret_rate'] = (jnp.abs(ret_normed) >= 1.0).mean()
   for k in act:
-    metrics[f'ent/{k}'] = ents[k].mean()
+    if skill_key in act and k in action_keys:
+      i = action_keys.index(k)
+      active = (act[skill_key][:, :-1] == i).astype(f32)
+      metrics[f'ent/{k}'] = (ents[k] * active).sum() / jnp.maximum(active.sum(), 1.0)
+    else:
+      metrics[f'ent/{k}'] = ents[k].mean()
     metrics[f'smooth/{k}'] = smooths[k].mean()
     if hasattr(policy[k], 'minent'):
       lo, hi = policy[k].minent, policy[k].maxent
@@ -707,6 +814,7 @@ def imag_loss(
 
   outs = {}
   outs['ret'] = ret
+  outs['rew'] = rew
   return losses, outs, metrics
 
 
