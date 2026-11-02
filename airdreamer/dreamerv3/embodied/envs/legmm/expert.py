@@ -96,6 +96,7 @@ def tcp_feasible(backend, base, h, tcp_w, R_w, holding=False, obj_offset=None):
   s.holding = holding
   if holding:
     s.obj_center = np.asarray(tcp_w) + R_w @ obj_offset
+    s.obj_R = R_w @ backend.state.obj_R_rel
   return not backend.arm_collides(s, PLAN_MARGIN)
 
 
@@ -140,13 +141,13 @@ def approach_options(scene, yaw_hint, include_blocked=False):
   for i in range(scenes.N_DIRS):
     if not (scene.approach[i] or include_blocked):
       continue
-    d = scenes.APPROACH_DIRS[i][:2]
+    d = scene.dirs[i][:2]
     axes = [(t, np.array([-d[0] * math.cos(t), -d[1] * math.cos(t), -math.sin(t)])) for t in TILTS]
     rot = lambda v, q: np.array([v[0] * math.cos(q) - v[1] * math.sin(q), v[0] * math.sin(q) + v[1] * math.cos(q)])
     stands = np.stack([d, rot(d, 0.5), rot(d, -0.5)])
     opts.append((i, stands, axes))
   if scene.approach[scenes.N_DIRS] or include_blocked:
-    stands = scenes.APPROACH_DIRS[:scenes.N_DIRS, :2]
+    stands = scene.dirs[:scenes.N_DIRS, :2]
     opts.append((scenes.N_DIRS, stands, [(0.0, np.array([0.0, 0.0, -1.0]))]))
   return opts
 
@@ -191,19 +192,22 @@ def place_candidates(backend, scene, bases_fn, jitter=np.zeros(2)):
   robot (staying inside the zone) and the gripper may pitch 0-90 deg down."""
   s = backend.state
   zone = scene.place
-  hz = scene.obj.half[2]
-  r_obj = float(scene.obj.half[0])
+  half = scene.obj.half
+  r_obj = float(max(half[0], half[1]))
   out = []
   for k in range(scenes.N_DIRS):
-    sd = scenes.APPROACH_DIRS[k][:2]
+    sd = scenes.APPROACH_DIRS[k][:2]      # the place zone is axis-aligned: world bins
     shift = np.clip(zone.center + 0.10 * sd + jitter, zone.center - zone.half + r_obj,
                     zone.center + zone.half - r_obj)
-    # Release with the bottom 1.5 cm above the support: middle of the env's
-    # [-0.005, 0.03] window; the closed-loop hold during 'act' keeps it there.
-    center = np.array([*shift, zone.support_z + hz + 0.015])
-    for base in bases_fn(sd, center):
+    for base in bases_fn(sd, np.array([*shift, zone.support_z])):
       for pitch in PLACE_PITCHES:
         R_w = geo.rot_z(base[2]) @ geo.rot_pitch(-pitch)
+        # Vertical half extent of the held object in this gripper orientation.
+        R_obj = R_w @ s.obj_R_rel
+        hz = float(sum(half[i] * abs(R_obj[2, i]) for i in range(3)))
+        # Release with the bottom 1.5 cm above the support: middle of the env's
+        # [-0.005, 0.03] window; the closed-loop hold during 'act' keeps it there.
+        center = np.array([*shift, zone.support_z + hz + 0.015])
         pre, goal, post = place_targets(scene, center, R_w, s.obj_offset)
         h = plan_at_base(backend, 'place', base, R_w, pre, goal, post, True, s.obj_offset)
         if h is not None:
@@ -250,7 +254,10 @@ def body_feasible(backend, base, h, ee_b, R_ee_b, holding=False, obj_offset=None
   s.holding = holding
   if holding:
     p_w = backend.to_world(s.ee_b, s)
-    s.obj_center = p_w + backend.R_body(s) @ R_ee_b @ obj_offset
+    R_w = backend.R_body(s) @ R_ee_b
+    s.obj_center = p_w + R_w @ obj_offset
+    rel = backend.state.obj_R_rel if backend.state.obj_R_rel is not None else np.eye(3)
+    s.obj_R = R_w @ rel
   return not backend.arm_collides(s, PLAN_MARGIN)
 
 
@@ -279,6 +286,9 @@ def transit_waypoints(backend, plan, start_b, R_start_b, holding=False, obj_offs
   start_b = np.asarray(start_b, np.float64)
   if plan.kind == 'pick':
     offset = plan.R_w.T @ (backend.state.obj_center - plan.goal_w)
+    # Orientation the object would have relative to the gripper after this grasp.
+    saved_rel = backend.state.obj_R_rel
+    backend.state.obj_R_rel = plan.R_w.T @ backend.state.obj_R
     carry_b = backend.shoulder_b + kb.CARRY_REL
     if not _leg_ok(backend, plan.base, plan.h, goal_b, post_b, R_plan_b, R_plan_b, True, offset):
       return None
@@ -296,6 +306,7 @@ def transit_waypoints(backend, plan, start_b, R_start_b, holding=False, obj_offs
                       offset, 8)):
         plan.raise_z, plan.turn_first, found = float(z), True, True
         break
+    backend.state.obj_R_rel = saved_rel
     if not found:
       return None
   for over in (0.10, 0.05, 0.0):
@@ -585,7 +596,7 @@ class ScriptedExpert:
       blocked = [i for i in range(scenes.N_DIRS) if not self.scene.approach[i]]
       if blocked:
         i = int(self.rng.choice(blocked))
-        d = scenes.APPROACH_DIRS[i][:2]
+        d = self.scene.dirs[i][:2]
         plan.stand_dir = d
         base = self.backend.state.obj_center[:2] + 0.7 * d
         plan.base = np.array([*base, math.atan2(-d[1], -d[0])])

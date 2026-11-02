@@ -24,7 +24,7 @@ from embodied.envs.legmm import interfaces as I
 def pregrasp(b, sc):
   s = b.state
   for i in np.where(sc.approach[:scenes.N_DIRS])[0]:
-    d = scenes.APPROACH_DIRS[i]
+    d = sc.dirs[i]
     c = s.obj_center
     for stand in (0.45, 0.55, 0.65, 0.75):
       x, y = c[0] + stand * d[0], c[1] + stand * d[1]

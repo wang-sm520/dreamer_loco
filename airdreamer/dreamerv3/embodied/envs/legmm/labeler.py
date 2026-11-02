@@ -19,8 +19,10 @@ from . import scenes
 
 class AffordanceLabeler:
 
-  def __init__(self, k_rollouts=4, every_n_steps=2, max_dist=2.0, horizon=30,
-               noise=0.05, seed=0, enabled=True, **unused):
+  def __init__(self, k_rollouts=4, every_n_steps=2, max_dist=2.0, horizon=40,
+               noise=0.05, seed=0, enabled=True, max_plans=3, grid=(5, 3, 3), **unused):
+    self.max_plans = int(max_plans)
+    self.grid = tuple(grid)
     self.k = int(k_rollouts)
     self.every = int(every_n_steps)
     self.max_dist = float(max_dist)
@@ -52,36 +54,16 @@ class AffordanceLabeler:
     return aff, mask
 
   def rate(self, env, which):
-    b = env.backend
-    s = b.state
-    bases = ex.local_bases(s, env.scene.boxes)
-    if which == 0:
-      plans = ex.pick_candidates(b, env.scene, bases)
-    else:
-      plans = ex.place_candidates(b, env.scene, lambda sd, c: bases(sd))
-    if not plans:
-      return 0.0
-    plans.sort(key=lambda p: p.score + _offset_cost(p, s))
-    plan = None
-    for cand in plans[:8]:
-      way = ex.transit_waypoints(b, cand, s.ee_b, s.R_ee_b, s.holding, s.obj_offset)
-      if way is not None:
-        cand.way_w = way
-        plan = cand
-        break
-    if plan is None:
-      return 0.0
-    snap = b.snapshot()
-    wins = 0
-    for _ in range(self.k):
-      b.restore(snap)
-      # Same Generator object (shared with the goal teacher), fresh state.
-      b.rng.bit_generator.state = np.random.default_rng(
-          self.rng.integers(2 ** 63)).bit_generator.state
-      wins += self._rollout(env, plan, which)
-      self.rollouts += 1
-    b.restore(snap)
-    return wins / self.k
+    """Label = best success rate over up to `max_plans` distinct local plans
+    (base_adj only: |dx| <= 0.15, |dy| <= 0.12 m, |dyaw| <= 0.3 rad). Searching
+    several plans (with gripper rolls and tilts) instead of one keeps labels
+    close to the stronger oracle (see tools/legmm_judge_eval.py)."""
+    from . import oracle
+    bases = oracle.fine_bases(env.backend.state, env.scene.boxes, self.grid)
+    rate, info = oracle.best_rate(env, which, bases, self.k, self.max_plans, self.horizon,
+                                  int(self.rng.integers(2 ** 31)))
+    self.rollouts += 4 * info['tried']
+    return rate
 
   def _rollout(self, env, plan, which):
     b = env.backend
@@ -137,7 +119,7 @@ def aff_geom_pick(backend, scene, max_angle=math.radians(60.0)):
   to_robot = sh_w[:2] - obj[:2]
   to_robot /= max(np.linalg.norm(to_robot), 1e-6)
   for i, _, axes in ex.approach_options(scene, s.yaw):
-    if i < scenes.N_DIRS and scenes.APPROACH_DIRS[i][:2] @ to_robot < math.cos(max_angle):
+    if i < scenes.N_DIRS and scene.dirs[i][:2] @ to_robot < math.cos(max_angle):
       continue
     for _, a in axes:
       R_w = ex.grasp_frame(a, s.yaw)

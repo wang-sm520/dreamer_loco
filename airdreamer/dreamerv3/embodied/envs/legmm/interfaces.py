@@ -134,7 +134,7 @@ GOAL_LAYOUT = {              # float32 (16,)；pick 与 place 各 8 维
     'pick_dir_b':   slice(0, 3),    # 机体系单位方向
     'pick_dxy':     slice(3, 4),    # 水平距离 m
     'pick_dz':      slice(4, 5),    # 高度差 m
-    'pick_yaw_sc':  slice(5, 7),    # 物体相对朝向 sin, cos
+    'pick_yaw_sc':  slice(5, 7),    # 物体相对朝向 sin, cos（扁盒：厚度方向的 2 倍角，180° 对称；圆柱恒为 0）
     'pick_valid':   slice(7, 8),    # 教师信号是否有效（模拟 RGB 检测丢失）
     'place_dir_b':  slice(8, 11),
     'place_dxy':    slice(11, 12),

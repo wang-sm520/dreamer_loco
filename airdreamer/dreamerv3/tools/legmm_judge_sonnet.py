@@ -41,6 +41,7 @@ def _image_block(path):
 
 def build_messages(packet):
   state = dict(packet['state'])
+  state.pop('reconstruct', None)
   question = state.pop('question', '')
   content = [_image_block(p) for p in packet['images']]
   content.append({'type': 'text', 'text': (

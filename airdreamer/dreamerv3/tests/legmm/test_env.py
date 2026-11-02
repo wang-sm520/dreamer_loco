@@ -76,7 +76,7 @@ def _teleport_to_grasp(env):
   s = b.state
   b._static = np.zeros((0, 6))      # no collisions in this unit test
   i = int(np.where(sc.approach[:scenes.N_DIRS])[0][0])
-  d = scenes.APPROACH_DIRS[i]
+  d = sc.dirs[i]
   c = s.obj_center
   s.x, s.y = c[0] + 0.45 * d[0], c[1] + 0.45 * d[1]
   s.yaw = math.atan2(-d[1], -d[0])

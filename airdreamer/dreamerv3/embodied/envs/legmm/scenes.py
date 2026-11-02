@@ -27,10 +27,16 @@ N_DIRS = 8                 # horizontal approach bins; index 8 = top-down
 
 @dataclasses.dataclass
 class SceneObject:
-  shape: str                 # 'box' | 'cyl'
+  shape: str                 # 'flat' (upright flat box) | 'cyl' (vertical cylinder)
   center: np.ndarray         # (3,) world
-  half: np.ndarray           # (3,) half extents; for 'cyl' half[0] == half[1] == radius
+  half: np.ndarray           # (3,) half extents in the object frame; 'flat': x = thickness,
+                             # y = width (wider than the gripper), z = height; 'cyl': (r, r, h/2)
   support_z: float           # z of the surface it rests on
+  yaw: float = 0.0           # object frame heading (world z rotation)
+
+  @property
+  def R(self):
+    return geo.rot_z(self.yaw)
 
 
 @dataclasses.dataclass
@@ -51,8 +57,14 @@ class Scene:
   obj: SceneObject
   place: PlaceZone
   start: np.ndarray          # (3,) x, y, yaw
-  approach: np.ndarray       # (9,) bool; 8 horizontal bins + top-down
+  approach: np.ndarray       # (9,) bool; graspable and free, per entry of `dirs`
   occupancy: Optional[np.ndarray] = None   # (gx, gy) bool, inflated by NAV_INFLATE
+  dirs: np.ndarray = None    # (9, 3) outward approach directions: 8 horizontal bins (in the
+                             # object frame for flat boxes) + top-down
+
+  def __post_init__(self):
+    if self.dirs is None:
+      self.dirs = object_dirs(self.obj)
 
   @property
   def grasp_point(self):
@@ -65,7 +77,7 @@ class Scene:
     parts = [self.boxes.round(6).tobytes(), self.obj.center.round(6).tobytes(),
              self.obj.half.round(6).tobytes(), self.place.center.round(6).tobytes(),
              self.start.round(6).tobytes(), self.approach.tobytes(),
-             str((self.scene_type, self.obj.shape, self.kinds)).encode()]
+             str((self.scene_type, self.obj.shape, round(self.obj.yaw, 6), self.kinds)).encode()]
     return zlib.crc32(b''.join(parts))
 
 
@@ -79,13 +91,45 @@ def approach_dirs():
 APPROACH_DIRS = approach_dirs()
 
 
-def approach_free(obj, boxes):
-  """Brief §6.2: a direction is approachable if a corridor of APPROACH_LEN from
-  the object surface along it is free of obstacles."""
+def object_dirs(obj):
+  """Approach bins of an object: world bins for cylinders, bins rotated into the
+  object frame for flat boxes (bins 2 and 6 are then the narrow faces +-y)."""
+  if obj.shape != 'flat':
+    return APPROACH_DIRS.copy()
+  dirs = APPROACH_DIRS.copy()
+  dirs[:N_DIRS] = dirs[:N_DIRS] @ obj.R.T
+  return dirs
+
+
+def graspable(obj, d, grip_max=0.075):
+  """Can the gripper close across the object when travelling along -d?
+  Fingers close horizontally, perpendicular to d."""
+  if d[2] > 0.5:
+    return False                       # top-down grasps are disabled (user decision)
+  c = np.array([-d[1], d[0], 0.0])
+  if obj.shape == 'flat':
+    R = obj.R
+    width = 2 * (obj.half[0] * abs(c @ R[:, 0]) + obj.half[1] * abs(c @ R[:, 1]))
+  else:
+    width = 2 * obj.half[0]
+  return width < grip_max
+
+
+def approach_free(obj, boxes, dirs=None):
+  """Brief §6.2 plus graspability: a direction is approachable if the gripper
+  can close across the object from it and a corridor of APPROACH_LEN from the
+  object surface along it is free of obstacles."""
+  dirs = object_dirs(obj) if dirs is None else dirs
   free = np.zeros(N_DIRS + 1, bool)
-  r_obj = max(obj.half[0], obj.half[1])
-  for i, d in enumerate(APPROACH_DIRS):
-    start = (obj.half[2] if i == N_DIRS else r_obj) + 0.01
+  R = obj.R
+  for i, d in enumerate(dirs):
+    if not graspable(obj, d):
+      continue
+    # Distance from the center to the surface along d.
+    surf = obj.half[2] if i == N_DIRS else (
+        abs(d @ R[:, 0]) * obj.half[0] + abs(d @ R[:, 1]) * obj.half[1]
+        if obj.shape == 'flat' else obj.half[0])
+    start = surf + 0.01
     ts = np.linspace(start, start + APPROACH_LEN, 6)
     pts = obj.center[None] + ts[:, None] * d[None]
     # Gripper width: also probe +-3 cm sideways.
@@ -162,12 +206,22 @@ class _Builder:
     return float(self.rng.uniform(lo, hi))
 
   def make_object(self, x, y, support_z):
-    size = self.cfg.get('object', {}).get('size', (0.04, 0.08))
-    width = self.u(*size)
-    height = self.u(0.08, 0.20)
-    shape = 'cyl' if self.rng.random() < 0.5 else 'box'
-    half = np.array([width / 2, width / 2, height / 2])
-    return SceneObject(shape, np.array([x, y, support_z + height / 2]), half, support_z)
+    """70% upright flat boxes (only the two narrow faces are graspable),
+    30% cylinders as a control (user decision 2026-11-02)."""
+    ocfg = self.cfg.get('object', {})
+    if self.rng.random() < float(ocfg.get('flat_frac', 0.7)):
+      f = ocfg.get('flat', {})
+      t = self.u(*f.get('thick', (0.03, 0.05)))
+      w = self.u(*f.get('wide', (0.10, 0.14)))
+      h = self.u(*f.get('height', (0.12, 0.15)))
+      half = np.array([t / 2, w / 2, h / 2])
+      return SceneObject('flat', np.array([x, y, support_z + h / 2]), half, support_z,
+                         yaw=self.u(0.0, math.pi))
+    c = ocfg.get('cyl', {})
+    d = self.u(*c.get('diameter', (0.04, 0.07)))
+    h = self.u(*c.get('height', (0.08, 0.20)))
+    half = np.array([d / 2, d / 2, h / 2])
+    return SceneObject('cyl', np.array([x, y, support_z + h / 2]), half, support_z)
 
   def free_xy(self, margin, avoid=(), tries=200):
     W, L = self.room
@@ -378,10 +432,13 @@ def make_scene(split, seed, cfg=None):
       occ = occupancy_grid(boxes, b.room)
       if not _connected(occ, b.room, start[:2], [obj.center[:2], place.center], 0.9):
         continue
+    approach = approach_free(obj, boxes)
+    if not approach.any():
+      continue    # e.g. both narrow faces of a flat box blocked: resample the layout
     return Scene(
         split=split, seed=int(seed), scene_type=int(stype), room=b.room.copy(),
         boxes=boxes, kinds=tuple(b.kinds), obj=obj, place=place, start=start,
-        approach=approach_free(obj, boxes), occupancy=occ)
+        approach=approach, occupancy=occ, dirs=object_dirs(obj))
   raise RuntimeError(f'could not build a scene for {split}/{seed}')
 
 

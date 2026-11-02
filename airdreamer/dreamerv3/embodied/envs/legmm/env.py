@@ -159,8 +159,13 @@ class LegMMEnv(embodied.Env):
 
   def _goal_obs(self):
     b, s = self.backend, self.backend.state
-    # Boxes, cylinders and place zones are axis-aligned, so their world yaw is 0.
-    targets = [(s.obj_center, 0.0), (self.scene.place_point(self.scene.obj.half[2]), 0.0)]
+    # Flat boxes: yaw of the thickness axis, encoded doubled (180 deg symmetric).
+    # Cylinders have no orientation: report 0 relative yaw. Place zones: yaw 0.
+    if self.scene.obj.shape == 'flat':
+      pick = (s.obj_center, math.atan2(s.obj_R[1, 0], s.obj_R[0, 0]), True)
+    else:
+      pick = (s.obj_center, s.yaw, False)
+    targets = [pick, (self.scene.place_point(self.scene.obj.half[2]), 0.0, False)]
     return self.goal(targets, b.base_pos(), b.R_body(), s.yaw)
 
   def _obs(self, reward, is_first=False, is_last=False, is_terminal=False, logs=None):

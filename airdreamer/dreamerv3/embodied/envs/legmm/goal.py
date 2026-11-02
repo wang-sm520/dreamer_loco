@@ -6,12 +6,13 @@ import numpy as np
 from . import interfaces as I
 
 
-def encode_target(p_world, yaw_world, base_pos, R_body, base_yaw, valid):
-  """8-dim block of interfaces.GOAL_LAYOUT for one target."""
+def encode_target(p_world, yaw_world, base_pos, R_body, base_yaw, valid, double=False):
+  """8-dim block of interfaces.GOAL_LAYOUT for one target. double=True encodes
+  twice the relative yaw (objects that look the same after a 180 deg turn)."""
   d = np.asarray(p_world, np.float64) - base_pos
   n = float(np.linalg.norm(d))
   dir_b = R_body.T @ d / max(n, 1e-6)
-  rel = yaw_world - base_yaw
+  rel = (yaw_world - base_yaw) * (2.0 if double else 1.0)
   return np.array([*dir_b, math.hypot(d[0], d[1]), d[2], math.sin(rel), math.cos(rel),
                    float(valid)], np.float32)
 
@@ -34,9 +35,10 @@ class GtNoisyGoal:
     self.last = None
 
   def __call__(self, targets, base_pos, R_body, base_yaw):
-    """targets: [(p_world (3,), yaw_world), ...] for pick and place."""
-    noisy = [(np.asarray(p) + self.rng.normal(0, self.pos_sigma, 3),
-              yaw + self.rng.normal(0, self.yaw_sigma)) for p, yaw in targets]
+    """targets: [(p_world (3,), yaw_world, double), ...] for pick and place."""
+    doubles = [t[2] if len(t) > 2 else False for t in targets]
+    noisy = [(np.asarray(t[0]) + self.rng.normal(0, self.pos_sigma, 3),
+              t[1] + self.rng.normal(0, self.yaw_sigma)) for t in targets]
     self.history.append(noisy)
     if len(self.history) > self.latency + 1:
       self.history.pop(0)
@@ -49,7 +51,8 @@ class GtNoisyGoal:
       out.append((p, yaw, not drop))
     self.last = [(p, yaw) for p, yaw, _ in out]
     return np.concatenate([
-        encode_target(p, yaw, base_pos, R_body, base_yaw, valid) for p, yaw, valid in out])
+        encode_target(p, yaw, base_pos, R_body, base_yaw, valid, dbl)
+        for (p, yaw, valid), dbl in zip(out, doubles)])
 
   def state(self):
     return (self.latency, list(self.history), self.last)

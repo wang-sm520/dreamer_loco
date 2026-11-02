@@ -82,7 +82,7 @@ class _PoseView:
     self.obj_center = np.asarray(obj_center)
 
 
-def make_packet(side, row, which, index, split, outdir):
+def make_packet(side, row, which, index, split, outdir, images=True):
   import matplotlib
   matplotlib.use('Agg')
   import matplotlib.pyplot as plt
@@ -92,13 +92,18 @@ def make_packet(side, row, which, index, split, outdir):
   sid = int(side['sample_id'][row])
   pdir = pathlib.Path(outdir) / f'{sid}_{which}'
   pdir.mkdir(parents=True, exist_ok=True)
-  fig, ax = plt.subplots(figsize=(5, 5))
-  viz.topdown(ax, scene, pose, None, title=f'{split}/{seed} {["pick", "place"][which]}')
-  fig.savefig(pdir / 'topdown.png', dpi=80)
-  plt.close(fig)
-  depth = index.step(sid)
-  for k, v in depth.items():
-    plt.imsave(pdir / f'{k}.png', viz.depth_rgb(v))
+  if not images:
+    scene = None
+  fig, ax = (plt.subplots(figsize=(5, 5)) if images else (None, None))
+  if images:
+    viz.topdown(ax, scene, pose, None, title=f'{split}/{seed} {["pick", "place"][which]}')
+    fig.savefig(pdir / 'topdown.png', dpi=80)
+    plt.close(fig)
+    depth = index.step(sid)
+    for k, v in depth.items():
+      plt.imsave(pdir / f'{k}.png', viz.depth_rgb(v))
+  else:
+    scene = scenes.make_scene(split, seed, {})
   state = dict(
       sample_id=sid, which=['pick', 'place'][which], split=split, seed=seed,
       scene_type=I.SceneType(int(side['scene_type'][row])).name,
@@ -108,6 +113,9 @@ def make_packet(side, row, which, index, split, outdir):
       object_center=[round(float(x), 3) for x in side['obj_center'][row]],
       place_zone=dict(center=scene.place.center.round(3).tolist(), support_z=round(scene.place.support_z, 3)),
       approach_dirs_free=scene.approach.astype(int).tolist(),
+      reconstruct={k: np.asarray(side[k][row]).tolist() for k in (
+          'ee_b', 'R_ee_b', 'v', 'grip', 'obj_R', 'obj_offset', 'obj_R_rel', 'dr_vel_scale',
+          'dr_latency', 'holding') if k in side},
       question=('Can the robot complete the ' + ['grasp', 'placement'][which] +
                 ' from this base pose using only small base adjustments (no re-navigation)?'))
   (pdir / 'state.json').write_text(json.dumps(state, indent=1))
@@ -144,7 +152,7 @@ def _packets_stage(a, data, side, eps, rng):
   pdir.mkdir(parents=True, exist_ok=True)
   with open(pdir / 'index.jsonl', 'w') as f:
     for row, which in rows:
-      packet = make_packet(side, row, which, index, split, pdir)
+      packet = make_packet(side, row, which, index, split, pdir, a.images == 'True')
       f.write(json.dumps({'dir': pathlib.Path(packet['dir']).name, 'state': packet['state']}) + '\n')
   return len(rows)
 
@@ -236,6 +244,7 @@ def main():
   p.add_argument('--apply', default='False')
   p.add_argument('--seed', type=int, default=0)
   p.add_argument('--workers', type=int, default=1, help='parallel judge calls')
+  p.add_argument('--images', default='True', help='False: state-only packets (oracle judge)')
   a = p.parse_args()
   if a.stage == 'judge':
     print(json.dumps({'judged': _judge_stage(a), 'verdicts': a.verdicts}))

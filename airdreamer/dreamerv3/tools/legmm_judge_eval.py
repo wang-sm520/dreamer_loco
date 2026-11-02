@@ -22,6 +22,9 @@ import numpy as np
 
 
 def reconstruct(split, row):
+  """Environment at a labeled state. Uses the full arm/object state and the
+  episode's dynamics randomization when the side table has them (collector
+  >= v3); otherwise falls back to a stowed arm without randomization."""
   from embodied.envs.legmm import collect, kin_backend as kb
   from embodied.envs.legmm.env import LegMMEnv
   cfg = collect.load_env_cfg()
@@ -31,12 +34,36 @@ def reconstruct(split, row):
   env = LegMMEnv('mm', seed=0, **cfg)
   env.forced_seed = int(row['seed'])
   env.step({'reset': True, **{k: np.zeros(v.shape, v.dtype) for k, v in env.act_space.items() if k != 'reset'}})
-  s = env.backend.state
+  b, s = env.backend, env.backend.state
   s.x, s.y, s.yaw, s.h = (float(v) for v in row['base'])
   s.obj_center = np.asarray(row['obj_center'], np.float64)
-  s.ee_b = env.backend.shoulder_b + kb.STOW_REL
-  s.R_ee_b = kb.R_STOW.copy()
+  if row.get('ee_b') is not None:
+    s.ee_b = np.asarray(row['ee_b'], np.float64)
+    s.R_ee_b = np.asarray(row['R_ee_b'], np.float64).reshape(3, 3)
+    s.v = np.asarray(row['v'], np.float64)
+    s.grip = float(row['grip'])
+    s.obj_R = np.asarray(row['obj_R'], np.float64).reshape(3, 3)
+    s.holding = bool(row.get('holding', False))
+    if s.holding:
+      s.obj_offset = np.asarray(row['obj_offset'], np.float64)
+      s.obj_R_rel = np.asarray(row['obj_R_rel'], np.float64).reshape(3, 3)
+      s.grip_closed = True
+    b.dr.vel_scale = np.asarray(row['dr_vel_scale'], np.float64)
+    b.dr.arm_latency = int(row['dr_latency'])
+  else:
+    s.ee_b = b.shoulder_b + kb.STOW_REL
+    s.R_ee_b = kb.R_STOW.copy()
   return env
+
+
+def side_row(side, r, which=0):
+  row = dict(sample_id=side['sample_id'][r], seed=side['seed'][r], base=side['base'][r].tolist(),
+             obj_center=side['obj_center'][r].tolist(), label=side['label_aff'][r, which],
+             geom=side['aff_geom'][r, which], holding=bool(side['holding'][r]))
+  for k in ('ee_b', 'R_ee_b', 'v', 'grip', 'obj_R', 'obj_offset', 'obj_R_rel', 'dr_vel_scale', 'dr_latency'):
+    if k in side:
+      row[k] = np.asarray(side[k][r]).tolist()
+  return row
 
 
 def features(env):
@@ -50,7 +77,7 @@ def features(env):
   free = []
   for i in range(scenes.N_DIRS):
     if sc.approach[i]:
-      d = scenes.APPROACH_DIRS[i]
+      d = sc.dirs[i]
       # Direction the gripper travels (-d) relative to the robot->object direction.
       ang = math.degrees(math.atan2(math.sin(math.atan2(-d[1], -d[0]) - to_obj),
                                     math.cos(math.atan2(-d[1], -d[0]) - to_obj)))
@@ -105,6 +132,8 @@ def main():
   p.add_argument('--workers', type=int, default=16)
   p.add_argument('--gpt_workers', type=int, default=8)
   p.add_argument('--out', default='')
+  p.add_argument('--pool', default='review', choices=['review', 'all'],
+                 help='review = samples the QA filter selects; all = any labeled pick sample')
   a = p.parse_args()
   import label_qa
   from embodied.envs.legmm import dataset_stats
@@ -112,11 +141,12 @@ def main():
   side, eps = dataset_stats.load_meta(data)
   split = eps[0]['split']
   rng = np.random.default_rng(a.seed)
-  sel = [(r, w) for r, w in label_qa.select(side) if w == 0]
+  if a.pool == 'review':
+    sel = [(r, w) for r, w in label_qa.select(side) if w == 0]
+  else:
+    sel = [(int(r), 0) for r in np.where(side['label_aff_mask'][:, 0] > 0)[0]]
   picks = [sel[i] for i in sorted(rng.choice(len(sel), min(a.n, len(sel)), replace=False))]
-  jobs = [(split, dict(sample_id=side['sample_id'][r], seed=side['seed'][r], base=side['base'][r].tolist(),
-                       obj_center=side['obj_center'][r].tolist(), label=side['label_aff'][r, 0],
-                       geom=side['aff_geom'][r, 0]), a.seed + i) for i, (r, _) in enumerate(picks)]
+  jobs = [(split, side_row(side, r), a.seed + i) for i, (r, _) in enumerate(picks)]
   with mp.get_context('spawn').Pool(a.workers) as pool:
     res = pool.map(audit, jobs)
   if a.gpt == 'True':

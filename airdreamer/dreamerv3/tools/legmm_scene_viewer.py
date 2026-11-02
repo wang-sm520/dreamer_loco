@@ -45,9 +45,9 @@ def draw_3d(ax, scene, backend, s, focus, radius=1.3, bad=None):
       continue
     ax.add_collection3d(Poly3DCollection(_box_faces(b), facecolor=COLORS.get(kind, 'gray'),
                                          edgecolor='k', linewidths=0.3, alpha=0.35))
-  obj = scene.obj
-  ob = np.concatenate([s.obj_center - obj.half, s.obj_center + obj.half])
-  ax.add_collection3d(Poly3DCollection(_box_faces(ob), facecolor='red', alpha=0.9))
+  cw = backend.obj_corners(s)   # order: x-, y-, z- varying fastest last (sx, sy, sz)
+  ofaces = [cw[[0, 1, 3, 2]], cw[[4, 5, 7, 6]], cw[[0, 1, 5, 4]], cw[[2, 3, 7, 6]], cw[[0, 2, 6, 4]], cw[[1, 3, 7, 5]]]
+  ax.add_collection3d(Poly3DCollection(ofaces, facecolor='red', alpha=0.9))
   z = scene.place
   zx, zy = z.center
   hx, hy = z.half
@@ -103,8 +103,8 @@ def pick_pose(env, e):
 def cubby_attempt(env):
   """Best effort for CUBBY: stand in front, fully crouched, horizontal approach."""
   b, s, sc = env.backend, env.backend.state, env.scene
-  i = int(np.argmax(scenes.APPROACH_DIRS[:scenes.N_DIRS, :2] @ (-s.obj_center[:2] / np.linalg.norm(s.obj_center[:2]))))
-  d = scenes.APPROACH_DIRS[i][:2]
+  i = int(np.argmax(sc.dirs[:scenes.N_DIRS, :2] @ (-s.obj_center[:2] / np.linalg.norm(s.obj_center[:2]))))
+  d = sc.dirs[i][:2]
   for r in np.arange(0.45, 1.0, 0.02):
     x, y = s.obj_center[0] + r * d[0], s.obj_center[1] + r * d[1]
     yaw = math.atan2(-d[1], -d[0])

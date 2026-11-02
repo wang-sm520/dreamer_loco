@@ -31,6 +31,7 @@ SCHEMA = {
 
 def build_prompt(packet):
   state = dict(packet['state'])
+  state.pop('reconstruct', None)
   question = state.pop('question', '')
   return (f'{SYSTEM}\n\nThe three attached images are: 1) top-down sketch, 2) head depth, '
           f'3) wrist depth.\nState: {json.dumps(state)}\n'
@@ -84,6 +85,7 @@ Give "feasible" or "infeasible" with confidence >= 0.8 only when these rules cle
 
 def build_prompt_v2(packet):
   state = dict(packet['state'])
+  state.pop('reconstruct', None)
   question = state.pop('question', '')
   geometry = state.pop('geometry', {})
   for k in ('aff_rollout', 'aff_geom'):

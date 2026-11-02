@@ -61,13 +61,13 @@ def _drop_diag(env, sub):
   s.holding = True
   pts = b.arm_points(s)
   pts_b = (pts - b.base_pos(s)) @ b.R_body(s)
-  hp = b.held_points(s)
+  hp = b.obj_corners(s)
   return dict(
       sub=sub, reason=b.drop_reason, h=round(float(s.h), 3), latency=int(b.dr.arm_latency),
       arm_static=[int(i) for i in np.where(geo.points_in_boxes(pts, b._static, kb.LINK_RADIUS).any(1))[0]],
       arm_body=[int(i) + 1 for i in np.where(geo.points_in_boxes(pts_b[1:], kb.BODY_BOX[None], 0.01).any(1))[0]],
-      held_static=bool(geo.points_in_boxes(hp[:1], b._static, float(env.scene.obj.half[0])).any()),
-      held_bottom_z=round(float(hp[1, 2]), 3), ee_b=[round(float(x), 3) for x in s.ee_b])
+      held_static=bool(geo.points_in_boxes(hp, b._static, 0.0).any()),
+      held_bottom_z=round(float(hp[:, 2].min()), 3), ee_b=[round(float(x), 3) for x in s.ee_b])
 
 
 def main():

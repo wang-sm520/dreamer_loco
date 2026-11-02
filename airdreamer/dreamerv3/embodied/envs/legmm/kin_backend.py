@@ -25,6 +25,13 @@ UPPER = 0.27009              # joint2 -> joint3
 FORE = 0.29015               # joint3 -> wrist (joint4/5)
 TOOL = 0.241                 # wrist (joint5) -> TCP between the finger pads
 GRIP_MAX_WIDTH = 0.08        # two fingers x 0.04 m stroke
+# AIRBOT Play joint limits (airbot_play.xml). The arm-base yaw zero direction is
+# assumed to face forward; joint1 is limited conservatively to +-2.089 rad (the
+# MJCF range is [-3.151, 2.089], sign convention unverified). TODO(calibrate)
+JOINT1_LIMIT = 2.089         # arm yaw |psi|
+SHOULDER_ELEV = (-0.181, 2.963)   # shoulder elevation range (from joint2 range)
+ELBOW_RANGE = (-0.094, 3.161)     # elbow bend (joint3)
+WRIST_BEND_MAX = 1.859            # angle between forearm and approach axis (joint5)
 LINK_RADIUS = 0.03
 GRIP_RATE = 0.5              # normalized opening change per high-level step
 ARM_SPEED_NAV = 0.05         # m per step when NAV moves the arm to stow/carry
@@ -72,9 +79,12 @@ class KinState:
   holding: bool = False
   obj_center: np.ndarray = None
   obj_offset: np.ndarray = None   # object center in the gripper frame while held
+  obj_R: np.ndarray = None        # object orientation (world)
+  obj_R_rel: np.ndarray = None    # object orientation in the gripper frame while held
   placed: bool = False
   n_failed: int = 0
   picked: bool = False
+  grip_width_held: float = 0.0
   arm_queue: list = dataclasses.field(default_factory=list)
 
 
@@ -148,7 +158,7 @@ class KinBackend:
     self.state = KinState(
         x=float(x), y=float(y), yaw=float(yaw), h=I.BASE_HEIGHT_RANGE[1], pitch=0.0,
         v=np.zeros(3), ee_b=self.shoulder_b + STOW_REL, R_ee_b=R_STOW.copy(), grip=1.0, grip_closed=False,
-        obj_center=scene.obj.center.copy())
+        obj_center=scene.obj.center.copy(), obj_R=scene.obj.R.copy())
     self._static = scene.boxes
     return self.state
 
@@ -239,18 +249,38 @@ class KinBackend:
         tip[None], self.wrist_cam_b(s)[None]], 0)
     return self.base_pos(s)[None] + pts_b @ self.R_body(s).T
 
-  def held_points(self, s=None):
+  def obj_corners(self, s=None):
     s = s or self.state
-    c = s.obj_center
-    hz = self.scene.obj.half[2]
-    return np.array([c, c - [0, 0, hz - 0.005]])
+    return geo.obb_corners(s.obj_center, self.scene.obj.half, s.obj_R)
+
+  def joint_ok(self, ee_b, R_ee_b):
+    """AIRBOT joint limits for the TCP pose (yaw, shoulder, elbow, wrist bend)."""
+    wrist = self.wrist_b(ee_b, R_ee_b)
+    v = wrist - self.shoulder_b
+    if math.hypot(v[0], v[1]) > 0.05 and abs(math.atan2(v[1], v[0])) > JOINT1_LIMIT:
+      return False
+    elbow, (_, alpha, gamma) = self.elbow_b(ee_b, R_ee_b)
+    if not (SHOULDER_ELEV[0] <= alpha <= SHOULDER_ELEV[1]):
+      return False
+    if not (ELBOW_RANGE[0] <= gamma <= ELBOW_RANGE[1]):
+      return False
+    fore = wrist - elbow
+    n = float(np.linalg.norm(fore))
+    if n > 1e-6:
+      bend = math.acos(float(np.clip(fore @ R_ee_b[:, 0] / n, -1.0, 1.0)))
+      if bend > WRIST_BEND_MAX:
+        return False
+    return True
 
   def collision_kind(self, s=None, margin=0.0):
-    """'' if free, else 'arm' (links / self collision), 'held' (held object
-    body), or 'held_bottom' (only the held object's bottom touches a support:
-    the arm is blocked, the object is not knocked away). margin > 0 adds
-    clearance for planners; the environment checks with margin 0."""
+    """'' if free, else 'limit' (AIRBOT joint limits), 'arm' (links / self
+    collision), 'held' (held object body), or 'held_bottom' (only the lowest
+    corners of the held object touch a support: the arm is blocked, the object
+    is not knocked away). margin > 0 adds clearance for planners; the
+    environment checks with margin 0."""
     s = s or self.state
+    if not self.joint_ok(s.ee_b, s.R_ee_b):
+      return 'limit'
     pts = self.arm_points(s)
     if geo.points_in_boxes(pts, self._static, LINK_RADIUS + margin).any():
       return 'arm'
@@ -259,11 +289,16 @@ class KinBackend:
     if geo.points_in_boxes(pts_b[1:], BODY_BOX[None], 0.01 + 3 * margin).any():
       return 'arm'
     if s.holding:
-      hp = self.held_points(s)
-      r = float(self.scene.obj.half[0])
-      if geo.points_in_boxes(hp[:1], self._static, r + margin).any():
+      corners = self.obj_corners(s)
+      zmin = corners[:, 2].min()
+      bottom = corners[:, 2] < zmin + 0.01
+      body = np.concatenate([s.obj_center[None], corners[~bottom]], 0)
+      # Body points pulled 5 mm inwards so that resting contact is not a collision.
+      body = s.obj_center + (body - s.obj_center) * 0.9
+      if geo.points_in_boxes(body, self._static, margin).any():
         return 'held'
-      if geo.points_in_boxes(hp[1:], self._static, margin).any() or hp[1, 2] < margin:
+      low = corners[bottom]
+      if geo.points_in_boxes(low, self._static, margin).any() or zmin < margin:
         return 'held_bottom'
     return ''
 
@@ -282,7 +317,7 @@ class KinBackend:
 
     Returns a dict of events for this high-level step."""
     s = self.state
-    ev = dict(collision=False, arm_collision=False, grasp_success=False,
+    ev = dict(collision=False, arm_collision=False, arm_limit=False, grasp_success=False,
               failed_grasp=False, grasp_attempt=False, place_success=False,
               dropped=False, base_disp=0.0)
     prev = copy.deepcopy(s)
@@ -343,8 +378,15 @@ class KinBackend:
     if s.holding:
       self._carry(s)
     kind = self.collision_kind(s)
+    if kind == 'limit':
+      # Joint limit: the arm stops there (no collision penalty).
+      ev['arm_limit'] = True
+      s.ee_b, s.R_ee_b = prev.ee_b.copy(), prev.R_ee_b.copy()
+      if s.holding:
+        self._carry(s)
+      kind = self.collision_kind(s)
     if kind:
-      if s.holding and kind != 'held_bottom':
+      if s.holding and kind not in ('held_bottom', 'limit'):
         s.holding = False
         ev['dropped'] = True
         self.drop_reason = f'collision_{kind}'
@@ -375,30 +417,45 @@ class KinBackend:
         self._release(s, ev)
     target = 0.0 if s.grip_closed else 1.0
     if s.holding:
-      target = 2 * self.scene.obj.half[0] / GRIP_MAX_WIDTH
+      target = s.grip_width_held / GRIP_MAX_WIDTH
     s.grip = float(np.clip(s.grip + np.clip(target - s.grip, -GRIP_RATE, GRIP_RATE), 0, 1))
     return ev
 
   def _carry(self, s):
     p, R = self.ee_world(s)
     s.obj_center = p + R @ s.obj_offset
+    s.obj_R = R @ s.obj_R_rel
+
+  def object_width_along(self, c, s=None):
+    """Extent of the object along unit vector c (gripper closing axis)."""
+    s = s or self.state
+    obj = self.scene.obj
+    R = s.obj_R
+    if obj.shape == 'flat':
+      return 2 * float(sum(obj.half[i] * abs(c @ R[:, i]) for i in range(3)))
+    axis = R[:, 2]
+    radial = math.sqrt(max(0.0, 1.0 - float(c @ axis) ** 2))
+    return 2 * (obj.half[0] * radial + obj.half[2] * abs(float(c @ axis)))
 
   def _try_grasp(self, s, ev):
     p, R = self.ee_world(s)
-    obj = self.scene.obj
     dist = float(np.linalg.norm(p - s.obj_center))
     if dist > GRASP_ATTEMPT_RADIUS:
       return
     ev['grasp_attempt'] = True
     approach = R[:, 0]
-    ok_dist = dist < GRASP_TOL + float(obj.half[0])
-    ok_width = 2 * float(obj.half[0]) < GRIP_MAX_WIDTH - 0.005
-    cos = scenes.APPROACH_DIRS[self.scene.approach] @ (-approach)
+    ok_dist = dist < GRASP_TOL + 0.02
+    # Fingers close along the gripper y axis: the object must fit across it.
+    width = self.object_width_along(R[:, 1], s)
+    ok_width = width < GRIP_MAX_WIDTH - 0.005
+    cos = self.scene.dirs[self.scene.approach] @ (-approach)
     ok_dir = bool((cos > math.cos(GRASP_ANGLE)).any())
     ok_free = not self.arm_collides(s)
     if ok_dist and ok_width and ok_dir and ok_free and self.rng.random() < GRASP_P:
       s.holding = s.picked = True
       s.obj_offset = R.T @ (s.obj_center - p)
+      s.obj_R_rel = R.T @ s.obj_R
+      s.grip_width_held = width
       ev['grasp_success'] = True
     else:
       s.n_failed += 1
@@ -407,11 +464,12 @@ class KinBackend:
   def _release(self, s, ev):
     s.holding = False
     zone = self.scene.place
-    bottom = s.obj_center[2] - self.scene.obj.half[2]
+    corners = self.obj_corners(s)
+    bottom = float(corners[:, 2].min())
     inside = np.all(np.abs(s.obj_center[:2] - zone.center) <= zone.half)
     if inside and -0.005 <= bottom - zone.support_z <= PLACE_TOL:
       s.placed = True
-      s.obj_center = np.array([*s.obj_center[:2], zone.support_z + self.scene.obj.half[2]])
+      s.obj_center = s.obj_center + [0.0, 0.0, zone.support_z - bottom]
       ev['place_success'] = True
     else:
       ev['dropped'] = True
@@ -421,14 +479,15 @@ class KinBackend:
   # ---------------------------------------------------------------- sensors
 
   def object_geometry(self, s=None):
+    """(obb or None, cylinders): flat boxes are oriented boxes; cylinders are
+    rendered upright."""
     s = s or self.state
     obj = self.scene.obj
     if obj.shape == 'cyl':
       c = s.obj_center
       cyl = np.array([[c[0], c[1], obj.half[0], c[2] - obj.half[2], c[2] + obj.half[2]]])
-      return geo.EMPTY_BOXES, cyl
-    box = np.concatenate([s.obj_center - obj.half, s.obj_center + obj.half])[None]
-    return box, geo.EMPTY_CYLS
+      return None, cyl
+    return (s.obj_center, obj.half, s.obj_R), geo.EMPTY_CYLS
 
   def camera_pose(self, name, s=None):
     s = s or self.state
@@ -447,8 +506,8 @@ class KinBackend:
     s = s or self.state
     pos, R = self.camera_pose(name, s)
     dirs = self.rays @ R.T
-    obox, ocyl = self.object_geometry(s)
-    boxes = np.concatenate([self._static, obox], 0)
+    obb, ocyl = self.object_geometry(s)
+    boxes = self._static
     if name == 'head':
       pts = self.arm_points(s)
       r = 0.04
@@ -456,6 +515,8 @@ class KinBackend:
     boxes = boxes[geo.boxes_in_front(pos, R[:, 0], boxes)]
     t = np.minimum(geo.ray_boxes(pos, dirs, boxes), geo.ray_floor(pos, dirs))
     t = np.minimum(t, geo.ray_cylinders(pos, dirs, ocyl))
+    if obb is not None:
+      t = np.minimum(t, geo.ray_obb(pos, dirs, *obb))
     return t.reshape(I.DEPTH_H, I.DEPTH_W)
 
   def render(self, name, s=None, noise=True):

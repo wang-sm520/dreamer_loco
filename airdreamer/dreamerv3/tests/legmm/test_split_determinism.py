@@ -31,25 +31,22 @@ def test_held_out_types():
   assert held <= types and types <= set(I.SPLITS['test_constrained']['types'])
 
 
-def test_cubby_blocks_top_and_opens_to_the_room():
+def test_cubby_and_flat_objects():
+  """Top-down grasps are disabled; every scene has at least one graspable free
+  direction; for flat boxes only the two narrow faces (+-y of the object) can
+  be graspable."""
   lo, _ = I.SPLITS['test_constrained']['seeds']
-  n_cubby = 0
+  n_flat = 0
   for s in range(lo, lo + 60):
     sc = scenes.make_scene('test_constrained', s, {})
-    if sc.scene_type != I.SceneType.CUBBY:
-      continue
-    n_cubby += 1
-    assert not sc.approach[scenes.N_DIRS], 'cubby must block top-down access'
-    # Cubbies stand against the nearest wall and open away from it; the bin
-    # pointing out of the opening must be free.
-    # (Other bins may be formally free too: the brief's 0.25 m corridor rule
-    # does not reach the side/back panels of a deep or wide cubby.)
-    near_wall = np.argmax(np.abs(sc.obj.center[:2]))
-    n = np.zeros(2)
-    n[near_wall] = -np.sign(sc.obj.center[near_wall])
-    i = int(np.argmax(scenes.APPROACH_DIRS[:scenes.N_DIRS, :2] @ n))
-    assert sc.approach[i], (s, sc.approach)
-  assert n_cubby >= 5
+    assert not sc.approach[scenes.N_DIRS]
+    assert sc.approach.any()
+    if sc.obj.shape == 'flat':
+      n_flat += 1
+      wide = sc.obj.R[:, 1]
+      for i in np.where(sc.approach)[0]:
+        assert abs(sc.dirs[i] @ wide) > 0.99, (s, i)
+  assert 25 <= n_flat <= 55
 
 
 def test_env_episode_seed_from_split():

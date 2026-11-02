@@ -24,9 +24,15 @@ def topdown(ax, scene, state=None, backend=None, title=None, path_xy=None):
   ax.add_patch(mp.Rectangle(z.center - z.half, *(2 * z.half), fill=False, ec='g', lw=1.5))
   obj = scene.obj if state is None else None
   c = scene.obj.center if state is None else state.obj_center
-  ax.add_patch(mp.Circle(c[:2], max(scene.obj.half[0], 0.04), color='r'))
+  if scene.obj.shape == 'flat':
+    R = scene.obj.R if getattr(state, 'obj_R', None) is None else state.obj_R
+    hx, hy = scene.obj.half[:2]
+    pts = np.array([[hx, hy, 0], [hx, -hy, 0], [-hx, -hy, 0], [-hx, hy, 0]]) @ R.T + c
+    ax.add_patch(mp.Polygon(pts[:, :2], color='r'))
+  else:
+    ax.add_patch(mp.Circle(c[:2], max(scene.obj.half[0], 0.04), color='r'))
   for i, ok in enumerate(scene.approach[:scenes.N_DIRS]):
-    d = scenes.APPROACH_DIRS[i]
+    d = scene.dirs[i]
     ax.plot([c[0], c[0] + 0.3 * d[0]], [c[1], c[1] + 0.3 * d[1]],
             color='g' if ok else 'r', lw=1)
   del obj

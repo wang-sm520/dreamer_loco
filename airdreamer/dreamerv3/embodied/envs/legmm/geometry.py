@@ -110,6 +110,18 @@ def boxes_in_front(origin, forward, boxes, min_depth=0.0):
   return best > min_depth
 
 
+def ray_obb(origin, dirs, center, half, R):
+  """Nearest positive hit of rays against one oriented box (R: box -> world)."""
+  o = (np.asarray(origin) - center) @ R
+  d = np.asarray(dirs) @ R
+  return ray_boxes(o, d, np.concatenate([-half, half])[None])
+
+
+def obb_corners(center, half, R):
+  signs = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)], float)
+  return center[None] + (signs * half[None]) @ R.T
+
+
 def ray_cylinders(origin, dirs, cyls):
   """Nearest positive hit of rays against finite vertical cylinders."""
   if len(cyls) == 0:

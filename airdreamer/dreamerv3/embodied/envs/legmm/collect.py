@@ -22,7 +22,9 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parents[3]   # .../airdreamer/dreamerv3
 
 SIDE_KEYS = ('sample_id', 'episode', 't', 'seed', 'scene_type', 'phase', 'skill', 'label_aff',
-             'label_aff_mask', 'aff_geom', 'base', 'obj_center', 'holding', 'explore', 'dart')
+             'label_aff_mask', 'aff_geom', 'base', 'obj_center', 'holding', 'explore', 'dart',
+             'ee_b', 'R_ee_b', 'v', 'grip', 'obj_R', 'obj_offset', 'obj_R_rel', 'dr_vel_scale',
+             'dr_latency')
 
 
 def load_env_cfg(presets=('legmm',), overrides=()):
@@ -103,6 +105,16 @@ def worker_main(args):
     side['base'].append(np.array([s.x, s.y, s.yaw, s.h], np.float32))
     side['obj_center'].append(np.asarray(s.obj_center, np.float32))
     side['holding'].append(bool(s.holding))
+    # Full arm / object state at labeling time, for faithful reconstruction (QA).
+    side['ee_b'].append(np.asarray(s.ee_b, np.float32))
+    side['R_ee_b'].append(np.asarray(s.R_ee_b, np.float32))
+    side['v'].append(np.asarray(s.v, np.float32))
+    side['grip'].append(np.float32(s.grip))
+    side['obj_R'].append(np.asarray(s.obj_R, np.float32))
+    side['obj_offset'].append(np.asarray(s.obj_offset if s.obj_offset is not None else np.zeros(3), np.float32))
+    side['obj_R_rel'].append(np.asarray(s.obj_R_rel if s.obj_R_rel is not None else np.eye(3), np.float32))
+    side['dr_vel_scale'].append(np.asarray(env.backend.dr.vel_scale, np.float32))
+    side['dr_latency'].append(np.int32(env.backend.dr.arm_latency))
     side['explore'].append(bool(explore))
     side['dart'].append(bool(expert.dart))
     ep_stats['grasp_attempts'] += int(obs.get('log/grasp_attempt', 0))

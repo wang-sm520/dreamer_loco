@@ -24,7 +24,7 @@ def demo_pose(backend, scene):
   """Stand in front of the object along the first free approach direction."""
   obj = scene.obj
   free = np.where(scene.approach[:scenes.N_DIRS])[0]
-  dirs = scenes.APPROACH_DIRS[free] if len(free) else scenes.APPROACH_DIRS[:1]
+  dirs = scene.dirs[free] if len(free) else scene.dirs[:1]
   s = backend.state
   for d in dirs:
     for dist in (0.75, 0.9, 1.1, 1.4):
