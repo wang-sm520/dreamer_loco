@@ -47,7 +47,14 @@ def reconstruct(split, row):
     if s.holding:
       s.obj_offset = np.asarray(row['obj_offset'], np.float64)
       s.obj_R_rel = np.asarray(row['obj_R_rel'], np.float64).reshape(3, 3)
-      s.grip_closed = True
+    s.grip_closed = bool(row.get('grip_closed', s.grip_closed))
+    s.n_failed = int(row.get('n_failed', s.n_failed))
+    s.picked = bool(row.get('picked', s.picked))
+    if row.get('arm_queue_len', 0):
+      s.arm_queue = [(np.asarray(row['arm_queue_dee_pos'], np.float64),
+                      np.asarray(row['arm_queue_dee_rot'], np.float64),
+                      (None if np.isnan(float(row['arm_queue_grip'])) else float(row['arm_queue_grip'])),
+                      bool(row['arm_queue_manip']))]
     b.dr.vel_scale = np.asarray(row['dr_vel_scale'], np.float64)
     b.dr.arm_latency = int(row['dr_latency'])
   else:
@@ -60,7 +67,9 @@ def side_row(side, r, which=0):
   row = dict(sample_id=side['sample_id'][r], seed=side['seed'][r], base=side['base'][r].tolist(),
              obj_center=side['obj_center'][r].tolist(), label=side['label_aff'][r, which],
              geom=side['aff_geom'][r, which], holding=bool(side['holding'][r]))
-  for k in ('ee_b', 'R_ee_b', 'v', 'grip', 'obj_R', 'obj_offset', 'obj_R_rel', 'dr_vel_scale', 'dr_latency'):
+  for k in ('ee_b', 'R_ee_b', 'v', 'grip', 'obj_R', 'obj_offset', 'obj_R_rel', 'dr_vel_scale', 'dr_latency',
+            'arm_queue_len', 'arm_queue_dee_pos', 'arm_queue_dee_rot', 'arm_queue_grip', 'arm_queue_manip',
+            'grip_closed', 'n_failed', 'picked'):
     if k in side:
       row[k] = np.asarray(side[k][r]).tolist()
   return row

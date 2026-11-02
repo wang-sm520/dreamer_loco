@@ -115,7 +115,8 @@ def make_packet(side, row, which, index, split, outdir, images=True):
       approach_dirs_free=scene.approach.astype(int).tolist(),
       reconstruct={k: np.asarray(side[k][row]).tolist() for k in (
           'ee_b', 'R_ee_b', 'v', 'grip', 'obj_R', 'obj_offset', 'obj_R_rel', 'dr_vel_scale',
-          'dr_latency', 'holding') if k in side},
+          'dr_latency', 'holding', 'arm_queue_len', 'arm_queue_dee_pos', 'arm_queue_dee_rot',
+          'arm_queue_grip', 'arm_queue_manip', 'grip_closed', 'n_failed', 'picked') if k in side},
       question=('Can the robot complete the ' + ['grasp', 'placement'][which] +
                 ' from this base pose using only small base adjustments (no re-navigation)?'))
   (pdir / 'state.json').write_text(json.dumps(state, indent=1))

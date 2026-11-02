@@ -24,7 +24,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]   # .../airdreamer/dreamerv3
 SIDE_KEYS = ('sample_id', 'episode', 't', 'seed', 'scene_type', 'phase', 'skill', 'label_aff',
              'label_aff_mask', 'aff_geom', 'base', 'obj_center', 'holding', 'explore', 'dart',
              'ee_b', 'R_ee_b', 'v', 'grip', 'obj_R', 'obj_offset', 'obj_R_rel', 'dr_vel_scale',
-             'dr_latency')
+             'dr_latency', 'arm_queue_len', 'arm_queue_dee_pos', 'arm_queue_dee_rot',
+             'arm_queue_grip', 'arm_queue_manip', 'grip_closed', 'n_failed', 'picked')
 
 
 def load_env_cfg(presets=('legmm',), overrides=()):
@@ -40,6 +41,26 @@ def load_env_cfg(presets=('legmm',), overrides=()):
 
 def _sample_id(worker, counter):
   return np.int64((int(worker) << 40) | int(counter))
+
+
+def state_side_fields(state, backend):
+  """Serialize the mutable simulator state used to reconstruct a label."""
+  q = list(state.arm_queue[:1])
+  return dict(
+      base=np.array([state.x, state.y, state.yaw, state.h], np.float32),
+      obj_center=np.asarray(state.obj_center, np.float32), holding=bool(state.holding),
+      ee_b=np.asarray(state.ee_b, np.float32), R_ee_b=np.asarray(state.R_ee_b, np.float32),
+      v=np.asarray(state.v, np.float32), grip=np.float32(state.grip),
+      obj_R=np.asarray(state.obj_R, np.float32),
+      obj_offset=np.asarray(state.obj_offset if state.obj_offset is not None else np.zeros(3), np.float32),
+      obj_R_rel=np.asarray(state.obj_R_rel if state.obj_R_rel is not None else np.eye(3), np.float32),
+      dr_vel_scale=np.asarray(backend.dr.vel_scale, np.float32), dr_latency=np.int32(backend.dr.arm_latency),
+      arm_queue_len=np.int32(len(q)),
+      arm_queue_dee_pos=np.asarray(q[0][0] if q else np.zeros(3), np.float32),
+      arm_queue_dee_rot=np.asarray(q[0][1] if q else np.zeros(3), np.float32),
+      arm_queue_grip=np.float32(q[0][2] if q and q[0][2] is not None else np.nan),
+      arm_queue_manip=bool(q[0][3]) if q else False, grip_closed=bool(state.grip_closed),
+      n_failed=np.int32(state.n_failed), picked=bool(state.picked))
 
 
 def worker_main(args):
@@ -102,19 +123,12 @@ def worker_main(args):
     side['label_aff'].append(np.asarray(obs['label_aff'], np.float32))
     side['label_aff_mask'].append(np.asarray(obs['label_aff_mask'], np.float32))
     side['aff_geom'].append(np.asarray(last['geom'] if last else np.zeros(2), np.float32))
-    side['base'].append(np.array([s.x, s.y, s.yaw, s.h], np.float32))
-    side['obj_center'].append(np.asarray(s.obj_center, np.float32))
-    side['holding'].append(bool(s.holding))
+    fields = state_side_fields(s, env.backend)
+    for key in ('base', 'obj_center', 'holding'):
+      side[key].append(fields.pop(key))
     # Full arm / object state at labeling time, for faithful reconstruction (QA).
-    side['ee_b'].append(np.asarray(s.ee_b, np.float32))
-    side['R_ee_b'].append(np.asarray(s.R_ee_b, np.float32))
-    side['v'].append(np.asarray(s.v, np.float32))
-    side['grip'].append(np.float32(s.grip))
-    side['obj_R'].append(np.asarray(s.obj_R, np.float32))
-    side['obj_offset'].append(np.asarray(s.obj_offset if s.obj_offset is not None else np.zeros(3), np.float32))
-    side['obj_R_rel'].append(np.asarray(s.obj_R_rel if s.obj_R_rel is not None else np.eye(3), np.float32))
-    side['dr_vel_scale'].append(np.asarray(env.backend.dr.vel_scale, np.float32))
-    side['dr_latency'].append(np.int32(env.backend.dr.arm_latency))
+    for key, value in fields.items():
+      side[key].append(value)
     side['explore'].append(bool(explore))
     side['dart'].append(bool(expert.dart))
     ep_stats['grasp_attempts'] += int(obs.get('log/grasp_attempt', 0))
