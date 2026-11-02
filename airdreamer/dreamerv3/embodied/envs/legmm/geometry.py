@@ -17,6 +17,11 @@ def rot_z(yaw):
   return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 
 
+def rot_x(roll):
+  c, s = math.cos(roll), math.sin(roll)
+  return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
+
+
 def rot_pitch(pitch):
   """Rotation about the body y axis. Negative pitch tilts the x axis down."""
   c, s = math.cos(pitch), math.sin(pitch)
