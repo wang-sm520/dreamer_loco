@@ -108,6 +108,7 @@ def main(argv=None):
       consec_train=config.consec_train,
       consec_report=config.consec_report,
       replay_context=config.replay_context,
+      offline_dir=config.offline.dir,
   )
 
   if config.script == 'train':
@@ -117,6 +118,14 @@ def main(argv=None):
         bind(make_agent, config), 
         bind(make_replay, config, 'replay'),
         bind(make_env, config),
+        bind(make_stream, config),
+        bind(make_logger, config),
+        args)
+
+  elif config.script == 'train_offline':
+    embodied.run.train_offline(
+        bind(make_agent, config),
+        bind(make_replay, config, 'replay'),
         bind(make_stream, config),
         bind(make_logger, config),
         args)
@@ -173,14 +182,22 @@ def main(argv=None):
 
 def make_agent(config):
   from .agent import Agent
-  env = make_env(config, 0)
-  #过滤指标键（key）的工具函数，专为避免与框架内部日志前缀冲突
-  notlog = lambda k: not k.startswith('log/')  
-  #过滤掉观测空间中所有以 log/ 开头的键，确保只保留用户定义的观测指标
-  obs_space = {k: v for k, v in env.obs_space.items() if notlog(k)}  
-  #移除动作空间中的 reset 键，确保只保留训练需要的常规动作
-  act_space = {k: v for k, v in env.act_space.items() if k != 'reset'}  
-  env.close()
+  # Offline training must not construct a simulator.  The LegMM interfaces are
+  # the authoritative space definition; the environment's ``spaces_only``
+  # mode is retained for callers that need the wrapper itself.
+  spaces_only = bool(getattr(config.env.legmm, 'spaces_only', False))
+  if str(config.task).startswith('legmm_') and (config.script == 'train_offline' or spaces_only):
+    from embodied.envs.legmm import interfaces as I
+    dtype = np.uint8 if str(config.env.legmm.obs_depth_dtype) == 'uint8' else np.float32
+    obs_space = {k: v for k, v in I.make_obs_space(dtype).items()
+                 if not k.startswith('log/')}
+    act_space = {k: v for k, v in I.make_act_space().items() if k != 'reset'}
+  else:
+    env = make_env(config, 0)
+    notlog = lambda k: not k.startswith('log/')
+    obs_space = {k: v for k, v in env.obs_space.items() if notlog(k)}
+    act_space = {k: v for k, v in env.act_space.items() if k != 'reset'}
+    env.close()
   if config.random_agent:
     return embodied.RandomAgent(obs_space, act_space)
   

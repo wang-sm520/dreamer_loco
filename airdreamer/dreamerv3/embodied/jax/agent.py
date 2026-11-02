@@ -379,8 +379,32 @@ class Agent(embodied.Agent):
         print('Loaded pretrained checkpoint with keys:', list(params.keys()))
         self.params.update(params)
       else:
+        expected = set(self.params)
+        actual = set(params)
+        missing = sorted(expected - actual)
+        unexpected = sorted(actual - expected)
+        # Phase transitions add the schedule counter (wm -> bc) and may alter
+        # optimizer bookkeeping.  Every model parameter must still be present;
+        # silently accepting any other mismatch would make a resumed run
+        # impossible to audit.
+        allowed = lambda key: key.startswith('agent_step') or key.startswith('opt/') or key.startswith('optimizer/')
+        bad_missing = [k for k in missing if not allowed(k)]
+        bad_unexpected = [k for k in unexpected if not allowed(k)]
+        if bad_missing or bad_unexpected:
+          raise KeyError(
+              f'Checkpoint parameter mismatch; missing={bad_missing}, '
+              f'unexpected={bad_unexpected}')
+        if missing or unexpected:
+          print(f'Checkpoint phase differences: missing={missing}, unexpected={unexpected}')
+        # Keep freshly initialized values for allowed missing keys and discard
+        # allowed extras from the source tree before checking shapes.
+        params = {k: v for k, v in params.items() if k in expected}
+        params = {k: params.get(k, self.params[k]) for k in expected}
         chex.assert_trees_all_equal_shapes(self.params, params)
-        jax.tree.map(lambda x: x.delete(), self.params)
+        # Keep allowed missing phase variables (for example agent_step) alive;
+        # they are initialized on this agent and are part of the merged tree.
+        jax.tree.map(lambda x: x.delete(),
+                     {k: v for k, v in self.params.items() if k in actual})
 
         loaded = {}
         for keys, _, shard_fn in self._ckpt_groups:

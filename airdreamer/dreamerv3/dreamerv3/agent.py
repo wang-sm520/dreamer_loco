@@ -437,6 +437,38 @@ class Agent(embodied.jax.Agent):
     outs = {'tokens': tokens, 'repfeat': repfeat, 'losses': losses}
     return loss, (carry, entries, outs, metrics)
 
+  def predict_heads(self, repfeat):
+    """Evaluate auxiliary heads on a representation for offline diagnostics.
+
+    This tiny ninjax-facing method keeps evaluation on the exact modules used
+    by training; the evaluator does not copy or reimplement any head network.
+    """
+    inp = self.feat2tensor(repfeat)
+    out = {}
+    if self.aff is not None:
+      out['aff'] = self.aff(inp, 2).output.logit
+    if self.phase is not None:
+      out['phase'] = self.phase(inp, 2).pred()
+    out['reward'] = self.rew(inp, 2).pred()
+    return out
+
+  def openloop_depth(self, carry, obs, prevact, horizon):
+    """Posterior context followed by recorded-action RSSM imagination."""
+    enc_carry, dyn_carry, dec_carry = carry
+    reset = obs['is_first']
+    _, _, tokens = self.enc(enc_carry, obs, reset, training=False)
+    ctx = min(max(int(self.config.replay_context), 1), reset.shape[1])
+    dyn_carry, _, _ = self.dyn.observe(
+        dyn_carry, tokens[:, :ctx], {k: v[:, :ctx] for k, v in prevact.items()},
+        reset[:, :ctx], training=False)
+    actions = {k: v[:, ctx:ctx + horizon] for k, v in prevact.items()}
+    _, imgfeat, _ = self.dyn.imagine(
+        dyn_carry, actions, length=horizon, training=False)
+    _, _, recons = self.dec(
+        dec_carry, imgfeat, jnp.zeros((reset.shape[0], horizon), bool), training=False)
+    return {k: v.pred() for k, v in recons.items()
+            if k in ('depth_head', 'depth_wrist')}
+
   def report(self, carry, data):
     if not self.config.report:
       return carry, {}
