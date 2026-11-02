@@ -296,7 +296,12 @@ defaults:
       use_seed: True
       room_size: [8.0, 8.0]
       n_obstacles: [3, 8]
-      object: {size: [0.04, 0.07], mass: [0.05, 0.8]}   # width < 0.08 m gripper stroke; AIRBOT Play rated payload 1.5 kg
+      # Objects (user decision 2026-11-02): 70% upright flat boxes, graspable only across the
+      # thickness, i.e. from the two narrow faces; 30% cylinders as a control. No top-down grasps.
+      object: {flat_frac: 0.7, flat: {thick: [0.03, 0.05], wide: [0.10, 0.14], height: [0.12, 0.15]},
+               cyl: {diameter: [0.04, 0.07], height: [0.08, 0.20]}, mass: [0.05, 0.8]}
+      scene_filter: solvable       # train/val: require an expert pick plan; tests stay raw (none | solvable)
+      scene_filter_max_attempts: 100   # resample budget per stratum; raises if exhausted
       max_failed_grasps: 3
       # Head D435i at the A2's original front camera: lens module center in the
       # base_link mesh at (0.345, 0, 0.08), facing forward (unitree_a2/xmls/assets/base_link.STL).

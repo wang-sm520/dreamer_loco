@@ -16,7 +16,7 @@ from . import interfaces as I
 from . import labeler as lb
 from . import scenes
 
-TILTS = (0.45, 0.30, 0.15, 0.0)
+TILTS = (0.6, 0.45, 0.30, 0.15, 0.0)
 ROLLS = (0.0, math.pi / 2, -math.pi / 2)
 
 

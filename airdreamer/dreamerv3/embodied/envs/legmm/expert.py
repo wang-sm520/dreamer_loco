@@ -24,7 +24,10 @@ from . import scenes
 
 H_MIN, H_MAX = I.BASE_HEIGHT_RANGE
 STAND_RADII = (0.45, 0.55, 0.65, 0.72, 0.8, 0.88, 0.96)
-TILTS = (0.30, 0.15, 0.0)          # approach axis tilt below horizontal (rad)
+# Approach axis tilt below horizontal (rad). Floor objects need 0.45-0.6 with the
+# body fully crouched: AIRBOT's upper arm cannot point more than ~12 deg below
+# horizontal (joint2 limit), so the forearm must come down steeply.
+TILTS = (0.30, 0.15, 0.0, 0.45, 0.6)
 PRE_BACK = 0.10                    # pre-grasp distance along the approach axis
 ARM_GAIN = 0.6                     # proportional gain on TCP / orientation errors
 PLAN_MARGIN = 0.01                 # extra clearance in planning (x3 for self collision)
@@ -127,7 +130,8 @@ def plan_at_base(backend, kind, base, R_w, pre_w, goal_w, post_w, holding=False,
   if hr is None:
     return None
   lo, hi = hr
-  for h in (hi - 0.03, hi - 0.10, hi - 0.18, lo + 0.02):
+  hs = list(np.arange(min(hi - 0.03, H_MAX), max(lo, H_MIN) - 1e-9, -0.05)) + [max(lo, H_MIN) + 0.005]
+  for h in hs:
     if h < lo or h > hi or h < H_MIN or h > H_MAX:
       continue
     if all(tcp_feasible(backend, base, h, p, R_w, holding, obj_offset) for p in (pre_w, goal_w)):
@@ -320,6 +324,21 @@ def transit_waypoints(backend, plan, start_b, R_start_b, holding=False, obj_offs
       way = [w for w in (w1, w2) if np.linalg.norm(w - pre_b) > 0.02]
       return tuple(bp + Rb @ w for w in way)
   return None
+
+
+def scene_solvable(scene, cfg):
+  """Whether the actual expert can plan navigation and an initial pick.
+
+  This is a planner acceptance filter, not a proof that rejected layouts are
+  physically impossible or that the complete pick-and-place will succeed.
+  Use the same candidate ranking, staging checks and arm paths as execution;
+  a separate top-N ranking used to reject scenes the expert could complete.
+  """
+  backend = kb.KinBackend(cfg)
+  backend.reset(scene, np.random.default_rng(0))
+  policy = ScriptedExpert(ExpertConfig(diversity=False))
+  policy.reset(scene, np.random.default_rng(0), backend)
+  return policy._plan()
 
 
 # ---------------------------------------------------------------------------

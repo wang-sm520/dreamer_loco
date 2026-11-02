@@ -209,7 +209,8 @@ class _Builder:
     """70% upright flat boxes (only the two narrow faces are graspable),
     30% cylinders as a control (user decision 2026-11-02)."""
     ocfg = self.cfg.get('object', {})
-    if self.rng.random() < float(ocfg.get('flat_frac', 0.7)):
+    self.rng.random()  # retain the layout stream's draw count
+    if object_shape_of(self.split, self.seed, self.cfg) == 'flat':
       f = ocfg.get('flat', {})
       t = self.u(*f.get('thick', (0.03, 0.05)))
       w = self.u(*f.get('wide', (0.10, 0.14)))
@@ -392,6 +393,15 @@ def scene_type_of(split, seed):
   return SceneType(int(types[int(type_rng.integers(len(types)))]))
 
 
+def object_shape_of(split, seed, cfg=None):
+  """Choose the object stratum independently of layout retries and rejection."""
+  frac = float((cfg or {}).get('object', {}).get('flat_frac', 0.7))
+  if not 0.0 <= frac <= 1.0:
+    raise ValueError(f'object.flat_frac must be in [0, 1], got {frac}')
+  rng = np.random.default_rng([zlib.crc32(split.encode()), int(seed), 0x0B1EC7])
+  return 'flat' if rng.random() < frac else 'cyl'
+
+
 def make_scene(split, seed, cfg=None):
   cfg = dict(cfg or {})
   spec = SPLITS[split]
@@ -442,6 +452,13 @@ def make_scene(split, seed, cfg=None):
   raise RuntimeError(f'could not build a scene for {split}/{seed}')
 
 
-def sample_seed(split, rng):
+def sample_seed(split, rng, scene_type=None, shape=None, cfg=None):
   lo, hi = SPLITS[split]['seeds']
-  return int(rng.integers(lo, hi))
+  for _ in range(100000):
+    seed = int(rng.integers(lo, hi))
+    if scene_type is not None and scene_type_of(split, seed) != scene_type:
+      continue
+    if shape is not None and object_shape_of(split, seed, cfg) != shape:
+      continue
+    return seed
+  raise RuntimeError(f'no seed found for {split}/{scene_type}/{shape}')

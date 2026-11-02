@@ -18,15 +18,20 @@ import numpy as np
 
 
 def run_episodes(args):
-  split, seeds, diversity, wid, overrides = args
+  split, seeds, diversity, wid, overrides, *selection = args
+  filtered = bool(selection and selection[0])
   from legmm_utils import make_env, zero_action
   from embodied.envs.legmm import expert as ex
   from embodied.envs.legmm import interfaces as I
-  env = make_env(split, seed=1000 + wid)
-  rng = np.random.default_rng(wid)
+  env = make_env(split, scene_filter='solvable' if filtered else 'none')
   out = []
   for seed in seeds:
-    env.forced_seed = int(seed)
+    rng = np.random.default_rng([int(seed), 0xE1A1])
+    env.rng = np.random.default_rng(rng.integers(2 ** 63))
+    env.forced_seed = None
+    scene = env._sample_scene(seed=int(seed))
+    attempts, rejected = env.scene_filter_attempts, env.scene_filter_rejected
+    env.forced_seed = scene.seed
     obs = env.step(zero_action(reset=True))
     expert = ex.ScriptedExpert(ex.ExpertConfig(diversity=diversity, **overrides))
     expert.reset(env.scene, np.random.default_rng(rng.integers(2 ** 63)), env.backend)
@@ -45,7 +50,10 @@ def run_episodes(args):
         diag = dict(mode=sub, explore=expert.explore_left > 0)
       ret += float(obs['reward'])
       steps += 1
-    out.append(dict(seed=int(seed), scene_type=int(obs['log/scene_type']),
+    out.append(dict(seed=env.scene.seed, requested_seed=int(seed),
+                    object_shape=env.scene.obj.shape, object_size=(2 * env.scene.obj.half).tolist(),
+                    object_yaw=env.scene.obj.yaw, filter_attempts=attempts, filter_rejected=rejected,
+                    scene_type=int(obs['log/scene_type']),
                     success=bool(obs['log/success']), pick_success=bool(obs['log/pick_success']),
                     term_reason=I.TERM_REASONS[int(obs['log/term_reason'])], steps=steps,
                     ret=ret, seconds=time.perf_counter() - t0, last_skill=last_skill,
@@ -78,6 +86,8 @@ def main():
   p.add_argument('--out', default='')
   p.add_argument('--cfg', default='', help='ExpertConfig overrides, e.g. explore_frac=0,p_dart=0')
   p.add_argument('--types', default='', help='comma separated scene type ids to run')
+  p.add_argument('--solvable', default='False', choices=['True', 'False'],
+                 help='True: filter train/val like collection; test splits always remain raw')
   a = p.parse_args()
   diversity = a.diversity == 'True'
   overrides = {kv.split('=')[0]: float(kv.split('=')[1]) for kv in a.cfg.split(',') if kv}
@@ -87,20 +97,31 @@ def main():
   jobs = []
   for split in ('train', 'test_constrained'):
     lo, hi = I.SPLITS[split]['seeds']
-    by_type = collections.defaultdict(list)
+    wanted = set(I.SPLITS[split]['types'])
+    if split == 'test_constrained':
+      wanted &= {4, 5}
+    if types:
+      wanted &= types
+    if not wanted:
+      continue
+    counts = collections.Counter()
     for seed in range(lo, hi):
       t = int(scenes.scene_type_of(split, seed))
-      if split == 'test_constrained' and t not in (4, 5):
+      if t not in wanted or counts[t] >= a.episodes:
         continue
-      if types and t not in types:
-        continue
-      if len(by_type[t]) < a.episodes:
-        by_type[t].append(seed)
-    for t, seeds in by_type.items():
-      for k in range(0, len(seeds), max(1, len(seeds) // 4)):
-        jobs.append((split, seeds[k:k + max(1, len(seeds) // 4)], diversity, len(jobs), overrides))
+      jobs.append((split, [seed], diversity, len(jobs), overrides, a.solvable == 'True'))
+      counts[t] += 1
+      if all(counts[t] >= a.episodes for t in wanted):
+        break
+    if any(counts[t] < a.episodes for t in wanted):
+      raise RuntimeError(f'not enough seeds in {split}: {dict(counts)}')
+  rows = []
   with mp.Pool(a.workers) as pool:
-    rows = [r for chunk in pool.map(run_episodes, jobs) for r in chunk]
+    for chunk in pool.imap_unordered(run_episodes, jobs):
+      rows.extend(chunk)
+      if len(rows) % 25 == 0 or len(rows) == len(jobs):
+        print(f'evaluated {len(rows)}/{len(jobs)} episodes', flush=True)
+  rows.sort(key=lambda r: (r['scene_type'], r['requested_seed']))
   names = [t.name for t in I.SceneType]
   summary = {}
   for t in sorted({r['scene_type'] for r in rows}):
@@ -118,8 +139,19 @@ def main():
                                                  for r in rs if r['term_reason'] == 'collision')),
         collision_mode=dict(collections.Counter(str(r['drop_diag'].get('mode'))
                                                 for r in rs if r['term_reason'] == 'collision')))
-  res = dict(diversity=diversity, per_type=summary,
-             mean_return=float(np.mean([r['ret'] for r in rows])),
+  for name, stats in summary.items():
+    rs = [r for r in rows if names[r['scene_type']] == name]
+    attempts = sum(r['filter_attempts'] for r in rs)
+    rejected = sum(r['filter_rejected'] for r in rs)
+    stats['planner_filter'] = dict(attempts=attempts, rejected=rejected,
+                                   rejection_fraction=rejected / attempts if attempts else None)
+    stats['per_object_shape'] = {
+        shape: dict(n=len(sub), success=float(np.mean([r['success'] for r in sub])),
+                    pick_success=float(np.mean([r['pick_success'] for r in sub])))
+        for shape in sorted({r['object_shape'] for r in rs})
+        if (sub := [r for r in rs if r['object_shape'] == shape])}
+  res = dict(diversity=diversity, selection='filtered_train_val' if a.solvable == 'True' else 'raw',
+             per_type=summary, mean_return=float(np.mean([r['ret'] for r in rows])),
              sec_per_episode=float(np.mean([r['seconds'] for r in rows])))
   print(json.dumps(res, indent=1))
   if a.out:

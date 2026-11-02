@@ -38,6 +38,12 @@ class LegMMEnv(embodied.Env):
         k: float(v) for k, v in dict(cfg.get('reward', {})).items()
         if k in I.RewardCfg.__dataclass_fields__})
     self.cap = float(cfg.get('manip_base_speed_cap', 0.15))
+    self.scene_filter = str(cfg.get('scene_filter', 'solvable'))
+    if self.scene_filter not in ('none', 'solvable'):
+      raise ValueError(f'unknown scene_filter: {self.scene_filter}')
+    self.scene_filter_max_attempts = int(cfg.get('scene_filter_max_attempts', 100))
+    if self.scene_filter_max_attempts < 1:
+      raise ValueError('scene_filter_max_attempts must be positive')
     self._obs_space = {**I.make_obs_space(), **EXTRA_LOGS}
     self.labeler = None      # optional callable(env) -> (aff (2,), mask (2,))
     if spaces_only:
@@ -135,11 +141,34 @@ class LegMMEnv(embodied.Env):
       return 'timeout'
     return 'none'
 
-  def _reset(self):
-    seed = self.forced_seed
+  def _sample_scene(self, seed=None):
+    self.scene_filter_attempts = 0
+    self.scene_filter_rejected = 0
+    if self.forced_seed is not None:
+      return scenes.make_scene(self.split, self.forced_seed, self.cfg)
     if seed is None:
       seed = scenes.sample_seed(self.split, self.rng)
-    self.scene = scenes.make_scene(self.split, seed, self.cfg)
+    # Held-out splits retain the original task distribution. Forced seeds also
+    # bypass this filter so evaluation and QA can reproduce rejected layouts.
+    if self.scene_filter != 'solvable' or self.split not in ('train', 'val'):
+      return scenes.make_scene(self.split, seed, self.cfg)
+    from . import expert
+    stype = scenes.scene_type_of(self.split, seed)
+    shape = scenes.object_shape_of(self.split, seed, self.cfg)
+    for attempt in range(self.scene_filter_max_attempts):
+      if attempt:
+        seed = scenes.sample_seed(self.split, self.rng, stype, shape, self.cfg)
+      scene = scenes.make_scene(self.split, seed, self.cfg)
+      self.scene_filter_attempts += 1
+      if expert.scene_solvable(scene, self.cfg):
+        return scene
+      self.scene_filter_rejected += 1
+    raise RuntimeError(
+        f'expert planner rejected {self.scene_filter_max_attempts} layouts '
+        f'for {self.split}/{stype.name}/{shape}')
+
+  def _reset(self):
+    self.scene = self._sample_scene()
     ep_rng = np.random.default_rng(self.rng.integers(2 ** 63))
     from .kin_backend import make_dr
     dr = make_dr(self.cfg, ep_rng)
