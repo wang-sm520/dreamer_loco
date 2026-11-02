@@ -160,3 +160,36 @@ def test_label_qa_only_drops_masks(dataset, tmp_path):
     np.testing.assert_array_equal(d['label_aff'], before[f.name]['label_aff'])
   # Low-confidence or 'uncertain' verdicts never reject.
   assert not label_qa.contradicts('uncertain', 0.0)
+
+
+def test_sonnet_judge_parsing_and_request(dataset, tmp_path):
+  """The Sonnet 5 judge builds a 3-image request and parses JSON answers; no network."""
+  import sys
+  import pathlib
+  sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / 'tools'))
+  import label_qa
+  import legmm_judge_sonnet as js
+  from embodied.envs.legmm import dataset_stats
+  out, _, _ = dataset
+  side, _ = dataset_stats.load_meta(out)
+  row, which = label_qa.select(side)[0]
+  packet = label_qa.make_packet(side, row, which, label_qa.ChunkIndex(out), 'train', tmp_path)
+
+  class Fake:
+    def __init__(self):
+      self.messages = self
+      self.kwargs = None
+
+    def create(self, **kw):
+      self.kwargs = kw
+      block = type('B', (), {'text': 'Sure: {"verdict": "infeasible", "confidence": 0.85, "reason": "too far"}'})
+      return type('R', (), {'content': [block]})
+
+  fake = Fake()
+  res = js.judge(packet, client=fake)
+  assert res['verdict'] == 'infeasible' and res['confidence'] == 0.85
+  assert fake.kwargs['model'] == js.MODEL == 'claude-sonnet-5-5'
+  content = fake.kwargs['messages'][0]['content']
+  assert sum(c['type'] == 'image' for c in content) == 3
+  assert js.parse('nonsense')['verdict'] == 'uncertain'
+  assert js.parse('{"verdict": "maybe", "confidence": 2}')['verdict'] == 'uncertain'

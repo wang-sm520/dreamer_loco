@@ -1,6 +1,12 @@
 """AI review of affordance labels (brief §7.3).
 
-python tools/label_qa.py --data ~/data/legmm_v1/train --judge <module:function> [--apply True]
+Single machine:
+  python tools/label_qa.py --data ~/data/legmm_v1/train --judge <module:function> [--apply True]
+Split across machines (packets/apply where the data is, judge where the API is reachable):
+  python tools/label_qa.py --stage packets --data ~/data/legmm_v1/train [--max_packets N]
+  python tools/label_qa.py --stage judge --packets <data>/qa/packets --judge legmm_judge_sonnet:judge \
+      --verdicts <data>/qa/verdicts.jsonl
+  python tools/label_qa.py --stage apply --data ~/data/legmm_v1/train --verdicts <...>/verdicts.jsonl --apply True
 
 1. Filter labeled samples with |aff_rollout - aff_geom| > 0.5 or 0.25 < aff_rollout < 0.75.
 2. Build review packets: top-down sketch PNG, head and wrist depth PNGs, state JSON.
@@ -128,54 +134,117 @@ def drop_masks(data, index, rejects):
     tmp.replace(f)
 
 
+def _packets_stage(a, data, side, eps, rng):
+  split = a.split or (eps[0]['split'] if eps else 'train')
+  rows = select(side)
+  if a.max_packets and len(rows) > a.max_packets:
+    rows = [rows[i] for i in sorted(rng.choice(len(rows), a.max_packets, replace=False))]
+  index = ChunkIndex(data)
+  pdir = data / 'qa' / 'packets'
+  pdir.mkdir(parents=True, exist_ok=True)
+  with open(pdir / 'index.jsonl', 'w') as f:
+    for row, which in rows:
+      packet = make_packet(side, row, which, index, split, pdir)
+      f.write(json.dumps({'dir': pathlib.Path(packet['dir']).name, 'state': packet['state']}) + '\n')
+  return len(rows)
+
+
+def _load_packets(pdir):
+  pdir = pathlib.Path(pdir).expanduser()
+  for line in (pdir / 'index.jsonl').read_text().splitlines():
+    entry = json.loads(line)
+    d = pdir / entry['dir']
+    yield dict(dir=str(d), state=entry['state'],
+               images=[str(d / n) for n in ('topdown.png', 'depth_head.png', 'depth_wrist.png')])
+
+
+def _judge_stage(a):
+  judge = load_judge(a.judge)
+  vpath = pathlib.Path(a.verdicts).expanduser()
+  done = set()
+  if vpath.exists():
+    done = {(v['sample_id'], v['which']) for v in map(json.loads, vpath.read_text().splitlines())}
+  n = 0
+  with open(vpath, 'a') as f:
+    for packet in _load_packets(a.packets):
+      key = (packet['state']['sample_id'], packet['state']['which'])
+      if key in done:
+        continue
+      out = judge(packet)
+      f.write(json.dumps({'sample_id': key[0], 'which': key[1], 'judge': a.judge, **out}) + '\n')
+      f.flush()
+      n += 1
+  return n
+
+
+def _apply_stage(a, data, side, verdicts):
+  labeled = int((side['label_aff_mask'] > 0).sum())
+  rng = np.random.default_rng(a.seed)
+  states = {(e['state']['sample_id'], e['state']['which']): e['state']
+            for e in _load_packets(data / 'qa' / 'packets')}
+  rejects, log = [], []
+  for v in verdicts:
+    st = states.get((v['sample_id'], v['which']))
+    if st is None:
+      continue
+    aff = st['aff_rollout']
+    reject = (v.get('verdict') in ('feasible', 'infeasible') and contradicts(v['verdict'], aff)
+              and float(v.get('confidence', 0.0)) >= CONF_THRESHOLD)
+    log.append(dict(sample_id=st['sample_id'], which=st['which'], aff_rollout=aff,
+                    aff_geom=st['aff_geom'], judge=v.get('judge'), model=v.get('model'),
+                    verdict=v.get('verdict'), confidence=v.get('confidence'), reason=v.get('reason'),
+                    rejected=bool(reject), applied=a.apply == 'True'))
+    if reject:
+      rejects.append((st['sample_id'], 0 if st['which'] == 'pick' else 1))
+  qa_dir = data / 'qa'
+  with open(qa_dir / 'qa_log.jsonl', 'a') as f:
+    for e in log:
+      f.write(json.dumps(e) + '\n')
+  if a.apply == 'True' and rejects:
+    drop_masks(data, ChunkIndex(data), rejects)
+  examples = [log[i] for i in rng.choice(len(log), min(20, len(log)), replace=False)] if log else []
+  selected = len(select(side))
+  report = dict(
+      data=str(data), labeled=labeled, selected=selected, selected_frac=selected / max(labeled, 1),
+      reviewed=len(log), rejected=len(rejects), rejected_frac_of_labeled=len(rejects) / max(labeled, 1),
+      rejected_frac_of_reviewed=len(rejects) / max(len(log), 1), applied=a.apply == 'True',
+      verdicts={k: sum(e['verdict'] == k for e in log) for k in ('feasible', 'infeasible', 'uncertain')},
+      agree_with_rollout=sum((e['verdict'] == 'feasible') == (e['aff_rollout'] >= 0.5)
+                             for e in log if e['verdict'] != 'uncertain'),
+      examples=examples)
+  (qa_dir / 'qa_report.json').write_text(json.dumps(report, indent=1))
+  return report
+
+
 def main():
   p = argparse.ArgumentParser()
-  p.add_argument('--data', required=True)
+  p.add_argument('--stage', default='all', choices=['all', 'packets', 'judge', 'apply'])
+  p.add_argument('--data', default='')
+  p.add_argument('--packets', default='')
+  p.add_argument('--verdicts', default='')
   p.add_argument('--judge', default='none')
   p.add_argument('--split', default='')
   p.add_argument('--max_packets', type=int, default=0, help='0 = all selected samples')
   p.add_argument('--apply', default='False')
   p.add_argument('--seed', type=int, default=0)
   a = p.parse_args()
+  if a.stage == 'judge':
+    print(json.dumps({'judged': _judge_stage(a), 'verdicts': a.verdicts}))
+    return
   data = pathlib.Path(a.data).expanduser()
   side, eps = dataset_stats.load_meta(data)
-  split = a.split or (eps[0]['split'] if eps else 'train')
   rng = np.random.default_rng(a.seed)
-  judge = load_judge(a.judge)
-  labeled = int((side['label_aff_mask'] > 0).sum())
-  rows = select(side)
-  if a.max_packets and len(rows) > a.max_packets:
-    rows = [rows[i] for i in sorted(rng.choice(len(rows), a.max_packets, replace=False))]
-  index = ChunkIndex(data)
-  qa_dir = data / 'qa'
-  qa_dir.mkdir(exist_ok=True)
-  rejects, log = [], []
-  for row, which in rows:
-    packet = make_packet(side, row, which, index, split, qa_dir / 'packets')
-    out = judge(packet)
-    aff = packet['state']['aff_rollout']
-    reject = (out.get('verdict') in ('feasible', 'infeasible') and contradicts(out['verdict'], aff)
-              and float(out.get('confidence', 0.0)) >= CONF_THRESHOLD)
-    entry = dict(sample_id=packet['state']['sample_id'], which=packet['state']['which'],
-                 aff_rollout=aff, aff_geom=packet['state']['aff_geom'], judge=a.judge,
-                 verdict=out.get('verdict'), confidence=out.get('confidence'),
-                 reason=out.get('reason'), rejected=bool(reject), applied=a.apply == 'True')
-    log.append(entry)
-    if reject:
-      rejects.append((packet['state']['sample_id'], which))
-  with open(qa_dir / 'qa_log.jsonl', 'a') as f:
-    for e in log:
-      f.write(json.dumps(e) + '\n')
-  if a.apply == 'True' and rejects:
-    drop_masks(data, index, rejects)
-  examples = [log[i] for i in rng.choice(len(log), min(20, len(log)), replace=False)] if log else []
-  report = dict(
-      data=str(data), judge=a.judge, labeled=labeled, selected=len(select(side)),
-      selected_frac=len(select(side)) / max(labeled, 1), reviewed=len(log), rejected=len(rejects),
-      rejected_frac_of_labeled=len(rejects) / max(labeled, 1), applied=a.apply == 'True',
-      verdicts={v: sum(e['verdict'] == v for e in log) for v in ('feasible', 'infeasible', 'uncertain')},
-      examples=examples)
-  (qa_dir / 'qa_report.json').write_text(json.dumps(report, indent=1))
+  if a.stage in ('all', 'packets'):
+    n = _packets_stage(a, data, side, eps, rng)
+    print(json.dumps({'packets': n, 'selected': len(select(side)),
+                      'labeled': int((side['label_aff_mask'] > 0).sum())}))
+    if a.stage == 'packets':
+      return
+    a.packets = str(data / 'qa' / 'packets')
+    a.verdicts = a.verdicts or str(data / 'qa' / 'verdicts.jsonl')
+    _judge_stage(a)
+  verdicts = [json.loads(l) for l in pathlib.Path(a.verdicts).expanduser().read_text().splitlines()]
+  report = _apply_stage(a, data, side, verdicts)
   print(json.dumps({k: v for k, v in report.items() if k != 'examples'}, indent=1))
 
 
