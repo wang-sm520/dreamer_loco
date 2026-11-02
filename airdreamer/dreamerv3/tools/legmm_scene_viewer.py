@@ -162,15 +162,20 @@ def main():
   p = argparse.ArgumentParser()
   p.add_argument('--out', default='docs/legmm/scenes')
   p.add_argument('--video', default='True')
+  p.add_argument('--types', default='', help='e.g. CUBBY,OPEN (default: all)')
   a = p.parse_args()
   from legmm_utils import make_env, zero_action
   out = pathlib.Path(a.out)
   out.mkdir(parents=True, exist_ok=True)
   summary = []
-  for stype in I.SceneType:
+  for stype in ([I.SceneType[t] for t in a.types.split(",")] if a.types else I.SceneType):
     split = 'test_constrained' if stype in (I.SceneType.CORNER, I.SceneType.CUBBY) else 'train'
     lo, hi = I.SPLITS[split]['seeds']
-    seed = next(sd for sd in range(lo, hi) if scenes.scene_type_of(split, sd) == stype)
+    cands = [sd for sd in range(lo, hi) if scenes.scene_type_of(split, sd) == stype][:40]
+    from legmm_utils import env_cfg
+    # Show a layout the expert can solve when one exists (CUBBY is ~half reachable).
+    seed = next((sd for sd in cands if ex.scene_solvable(scenes.make_scene(split, sd, env_cfg()), env_cfg())),
+                cands[0])
     env = make_env(split, seed=0, domain_rand={'enabled': False})
     env.forced_seed = seed
     env.step(zero_action(reset=True))
