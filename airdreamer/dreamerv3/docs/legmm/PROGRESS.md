@@ -198,3 +198,36 @@
 
 ### 未解决
 - 293 个低置信度分歧保留了原标签，其中 234 个是“原标签判抓不到、强裁判倾向抓得到”，占全部标签 0.13%。
+
+## M3：agent 改造、离线训练与评测工具（2026-11-03；训练与验收数字待完成）
+
+### 完成项（均在 main）
+| 提交 | 内容 | 任务书 |
+|---|---|---|
+| d2a998c | 标签 key 不进 encoder/decoder；逐 key 重建权重；深度按像素归一化；jax 版 mask_inactive | §5.1–5.3 |
+| e4f312a | aff 头（梯度回传 world model，带掩码的软标签 BCE）、phase 头；BC 损失；train_phase 门控；退火计数器 | §5.4、§5.5、§5.6 第 4 条、§5.7 |
+| 72ee9d9 | `train_offline` 脚本；不建仿真器的 legmm 空间；跨阶段加载检查点；`tools/legmm_wm_eval.py`；`scripts/legmm/m3_{wm,bc}.sh` | §8 |
+| af4be7a | imag_loss：按技能屏蔽 logp/熵/平滑，切换代价，技能先验 KL；评测工具修正；无人机回归防线 | §5.6 第 1–3 条 |
+| 8a62d8d | `eval_legmm`：策略在环境中运行，逐回合 EpisodeMetrics，bootstrap 置信区间 | §9（M3 所需的最小版本） |
+
+测试：`tests/legmm` 共 83 项全部通过（CPU，约 10 分钟）。每个新功能都配了变异检验：故意改坏代码后，对应测试必须失败；验收时由监督方重跑。
+
+### 审查中发现并修复的问题
+1. BC 把回合最后一步存的零动作（技能为 NAV）当成了学习目标。两条数据路径都会写这个零动作：`driver.py:120` 和 `collect.py:101`。修复：BC 不计 `is_last` 位置。
+2. 不启用技能时，imag_loss 的平滑项被置为 0，无人机配置（`actsmooth` 5e-2）的行为因此改变。修复后加了两道防线：一是把提交 3e6f73d 的 imag_loss 原样复制为参考做比对；二是无人机配置在固定输入上各项损失的基准值。
+3. 评测工具找奖励事件用的是“奖励 > 1”，而且是在拉平的 (B·T) 数组上取前后偏移，会跨到相邻序列。修复：在每条序列内按 `label_phase` 的阶段切换定位事件。
+4. 评测用 `forced_seed` 指定布局时，绕过了环境里的可完成性筛选。修复：`eval.scene_filter` 设为 auto 时，训练集和验证集只用专家可完成的布局，测试集用原始布局。
+
+### 实测
+- 正式配置（size50m，batch 16×128，RTX 5090）：7.6–8.1 次更新/秒，编译 47.7 s，显存峰值 25.5 GB。来源：`~/logdir/legmm/m3_smoke/timing3/timing.log`、`~/logdir/legmm/m3/wm/metrics.jsonl`。
+- wm 训练应用户要求于 05:15 暂停，最近的检查点停在第 21681 步（共 2e5）。重启用 `~/logdir/legmm/m3/RESTART_wm.sh`。
+
+### 与任务书的偏离
+1. 离线数据里没有存 RSSM 上下文，`train_offline` 用零填充；训练时 `replay.update` 会写回真实值，与上游一致。
+2. `Agent.policy(mode='eval')` 和上游一样是采样动作，不取众数。
+3. 想象审议（§5.8）还没实现，`eval_legmm` 开启它时会报错。它只在评测中使用，属于 M5。
+4. legmm 的 agent 测试使用 `jax.jit=False`，jit 编译路径由 GPU 冒烟训练覆盖。
+
+### 未解决
+- M3 验收数字（验证集上的 aff AUROC/ECE、phase 准确率、深度开环 MAE、奖励头事件误差，以及 BC 在 OPEN 上的成功率）要等 wm 和 bc 训练完成。
+- bc 阶段的检查点没有 retnorm/valnorm/advnorm 的状态，rl 阶段（M4）加载时需要放行这几项。
