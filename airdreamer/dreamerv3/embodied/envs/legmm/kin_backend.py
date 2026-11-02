@@ -326,6 +326,10 @@ class KinBackend:
       s.ee_b = self.clip_ee(s.ee_b + dee_pos, s)
     else:
       target = self.shoulder_b + (CARRY_REL if s.holding else STOW_REL)
+      if s.ee_b[2] < target[2] - 0.02:
+        # Raise straight up first: pulling a low TCP straight back sweeps the
+        # forearm through the body/head and can block the arm forever.
+        target = np.array([s.ee_b[0], s.ee_b[1], target[2]])
       d = target - s.ee_b
       n = float(np.linalg.norm(d))
       s.ee_b = s.ee_b + (d if n <= ARM_SPEED_NAV else d * ARM_SPEED_NAV / n)

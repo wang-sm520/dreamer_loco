@@ -60,3 +60,26 @@ def test_env_episode_seed_from_split():
     obs = env.step(zero_action(reset=True))
     assert lo <= int(obs['log/seed']) < hi
     assert env.scene.fingerprint() == scenes.make_scene('val', int(obs['log/seed']), env.cfg).fingerprint()
+
+
+def test_layout_not_tied_to_scene_type():
+  """Regression: the layout RNG once shared its stream with the scene-type RNG,
+  so e.g. every CUBBY stood against the +x wall."""
+  import collections
+  sides = collections.defaultdict(collections.Counter)
+  for split, stype in (('test_constrained', I.SceneType.CUBBY), ('train', I.SceneType.WALL_BACK)):
+    lo, hi = I.SPLITS[split]['seeds']
+    n = 0
+    for seed in range(lo, hi):
+      if scenes.scene_type_of(split, seed) != stype:
+        continue
+      sc = scenes.make_scene(split, seed, {})
+      furn = np.array([b for b, k in zip(sc.boxes, sc.kinds) if k in ('cubby', 'table')])
+      c = (furn[:, :2].min(0) + furn[:, 3:5].max(0)) / 2
+      side = ('x+' if c[0] > 0 else 'x-') if abs(c[0]) > abs(c[1]) else ('y+' if c[1] > 0 else 'y-')
+      sides[stype.name][side] += 1
+      n += 1
+      if n >= 60:
+        break
+    assert len(sides[stype.name]) == 4, dict(sides)
+    assert max(sides[stype.name].values()) < 0.5 * n, dict(sides)

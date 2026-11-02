@@ -142,7 +142,10 @@ class _Builder:
 
   def __init__(self, split, seed, cfg, attempt=0):
     self.split, self.seed, self.cfg = split, int(seed), cfg
-    self.rng = np.random.default_rng([zlib.crc32(split.encode()), int(seed), attempt])
+    # The trailing non-zero tag matters: numpy's SeedSequence pads entropy with
+    # zeros, so [crc, seed, 0] would be the same stream as the scene-type RNG
+    # [crc, seed] and correlate the layout with the scene type.
+    self.rng = np.random.default_rng([zlib.crc32(split.encode()), int(seed), attempt, 0x5CE7E])
     self.room = np.asarray(cfg.get('room_size', (8.0, 8.0)), np.float64)
     self.boxes, self.kinds = [], []
     for w in _walls(self.room):
