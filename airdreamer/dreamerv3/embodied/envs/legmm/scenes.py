@@ -272,7 +272,10 @@ def _furniture(b, stype):
     if stype == SceneType.WALL_BACK:
       width, depth, h = b.u(1.0, 1.4), b.u(0.5, 0.7), b.u(0.40, 0.75)
     else:
-      width, depth, h = b.u(0.5, 0.7), b.u(0.4, 0.5), b.u(0.30, 0.40)
+      # Cubby: 0.45-0.55 m tall, object 3-8 cm inside the opening (user decision 2026-11-02).
+      # With 0.30-0.40 m and 8-18 cm no layout was reachable for A2 + AIRBOT; this gives
+      # ~half reachable layouts (the other half tests recognising infeasibility).
+      width, depth, h = b.u(0.5, 0.7), b.u(0.4, 0.5), b.u(0.45, 0.55)
     along = b.u(-span + width / 2 + 0.3, span - width / 2 - 0.3)
     cx, cy, sx, sy, n = _wall_frame(b, side, along, depth)
     sx = width if sx is None else sx
@@ -280,7 +283,7 @@ def _furniture(b, stype):
     t = np.array([-n[1], n[0]])                    # along the wall
     lateral = b.u(-width / 2 + 0.12, width / 2 - 0.12) if stype == SceneType.WALL_BACK \
         else b.u(-0.08, 0.08)
-    front_in = b.u(0.08, 0.30) if stype == SceneType.WALL_BACK else b.u(0.08, 0.18)
+    front_in = b.u(0.08, 0.30) if stype == SceneType.WALL_BACK else b.u(0.03, 0.08)
     front = np.array([cx, cy]) + n * depth / 2
     oxy = front - n * front_in + t * lateral
     if stype == SceneType.WALL_BACK:

@@ -80,3 +80,20 @@ def test_layout_not_tied_to_scene_type():
         break
     assert len(sides[stype.name]) == 4, dict(sides)
     assert max(sides[stype.name].values()) < 0.5 * n, dict(sides)
+
+
+def test_cubby_partly_reachable():
+  """CUBBY (0.45-0.55 m tall, object 3-8 cm inside): some layouts must be
+  reachable by the expert planner and some not (held-out test of recognising
+  infeasibility). Measured ~47% reachable over 30 layouts."""
+  from embodied.envs.legmm import expert
+  from legmm_utils import env_cfg
+  cfg = env_cfg()
+  lo, hi = I.SPLITS['test_constrained']['seeds']
+  seeds = [s for s in range(lo, hi) if scenes.scene_type_of('test_constrained', s) == I.SceneType.CUBBY][:12]
+  ok = [expert.scene_solvable(scenes.make_scene('test_constrained', s, cfg), cfg) for s in seeds]
+  assert 1 <= sum(ok) <= len(ok) - 1, ok
+  for s in seeds:
+    sc = scenes.make_scene('test_constrained', s, cfg)
+    cubby = np.array([b for b, k in zip(sc.boxes, sc.kinds) if k == 'cubby'])
+    assert 0.45 - 1e-9 <= cubby[:, 5].max() <= 0.55 + 1e-9
