@@ -334,7 +334,7 @@ defaults:
 
   # Offline datasets and legmm evaluation
   offline: {dir: '', copy_to_replay: True, eval_every: 5000}
-  eval: {episodes: 200, video_episodes: 6, online_aff_rollouts: 4}
+  eval: {episodes: 200, video_episodes: 6, online_aff_rollouts: 4, scene_types: '', scene_filter: auto}
 
   # Replay buffer
   replay:

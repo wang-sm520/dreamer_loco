@@ -1,4 +1,5 @@
 from .eval_only import eval_only
+from .eval_legmm import eval_legmm
 from .train import train
 from .train_offline import train_offline
 from .train_eval import train_eval
