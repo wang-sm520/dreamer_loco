@@ -113,3 +113,7 @@ agent 侧的改动都还没做：
 - `embodied/run/train_offline.py`，以及 `main.py` 中的 `train_offline` / `eval_legmm` 脚本。
 
 目前 `--configs legmm size1m legmm_debug --script train` 能端到端跑通，但 label_* 还会被当作观测重建，这是 M3 第一步要修的。注意 `imag_loss` 里 actsmooth 对所有 policy key 调用 `.pred()`；离散的 skill 头要在屏蔽逻辑里单独处理。
+
+## 2026-11-03 决定
+
+- 标签审核定稿为强裁判（`legmm_judge_oracle:judge`，与原标注器同一模拟器、同一规则，搜索更全）。gpt-6-astra 在 40 个送审样本上与强裁判一致率仅 44%（原提示词）/ 58%（加几何信息），不用于可行性判断和剔除。详见 PROGRESS「M2 收尾」。
