@@ -4,10 +4,18 @@ The policy API's ``mode`` argument is passed as ``mode='eval'`` below.  The
 current :class:`dreamerv3.agent.Agent` samples its action distributions in
 both modes (it does not take the mode), so this evaluator reports sampled
 policy behavior rather than an argmax policy.
+
+The B1 and B2 baselines replace only the switching decision. Navigation and
+manipulation use the :class:`~embodied.envs.legmm.expert.ScriptedExpert`
+controllers unchanged; the switch rule reads the observed ``obs['goal']``
+(the same noisy ``GoalProvider`` observation seen by the agent), never a
+privileged target. Their manipulation plan is anchored at the current base
+pose, so the controller's own ``base_adj`` is the only allowed adjustment.
 """
 
 import dataclasses
 import json
+import math
 import pathlib
 import time
 from collections import Counter
@@ -18,7 +26,9 @@ import elements
 from embodied.envs.legmm import interfaces as I
 from embodied.envs.legmm import expert
 from embodied.envs.legmm import labeler as labeler_lib
+from embodied.envs.legmm import planning
 from embodied.envs.legmm import scenes
+from embodied.envs.legmm import kin_backend as kb
 
 
 def bootstrap_ci(values, n_resamples=1000, seed=0, confidence=0.95):
@@ -106,6 +116,151 @@ def _set_forced_seed(env, seed):
   base.forced_seed = int(seed)
 
 
+class BaselinePolicy:
+  """B1/B2 switch policy using the existing scripted manipulation controller."""
+
+  def __init__(self, kind, env, heading_deg=30.0, switch_distance=0.75):
+    kind = str(kind).lower()
+    if kind not in ('b1', 'b2'):
+      raise ValueError(f'unknown baseline policy: {kind!r}')
+    self.kind = kind
+    self.env = env
+    self.heading_rad = np.deg2rad(float(heading_deg))
+    self.switch_distance = float(switch_distance)
+    self.expert = expert.ScriptedExpert(expert.ExpertConfig(diversity=False))
+    self.ctrl = None
+
+  def reset(self, seed=0):
+    self.expert.reset(self.env.scene, np.random.default_rng(int(seed)), self.env.backend)
+    self.ctrl = None
+    self.planner = planning.GridPlanner(self.env.scene, scenes.NAV_INFLATE)
+    self.path = None
+    self.path_target = None
+
+  @staticmethod
+  def _goal_block(obs):
+    # grip_effort is an observed proprioceptive signal: the backend reports
+    # 0.8 while carrying and 0.2 for a closed but empty gripper.
+    proprio = np.asarray(obs.get('proprio', ()), dtype=np.float32).reshape(-1)
+    effort = (float(proprio[I.PROPRIO_LAYOUT['grip_effort'].start])
+              if proprio.size > I.PROPRIO_LAYOUT['grip_effort'].start else 0.0)
+    width = (float(proprio[I.PROPRIO_LAYOUT['grip_width'].start])
+             if proprio.size > I.PROPRIO_LAYOUT['grip_width'].start else 1.0)
+    # Deployment has no label_phase. Holding is the observed gripper state:
+    # effort is high while carrying and the measured opening is below fully open.
+    holding = effort >= 0.5 and width < 0.98
+    return 8 if holding else 0, holding
+
+  def _observed_target(self, obs):
+    goal = np.asarray(obs['goal'], dtype=np.float32).reshape(-1)
+    start, holding = self._goal_block(obs)
+    direction = goal[start:start + 3]
+    distance = float(goal[start + 3])
+    bearing = float(np.arctan2(direction[1], direction[0]))
+    return direction, distance, bearing, holding
+
+  def should_switch(self, obs):
+    """Return the exact strict threshold decision used by B1/B2."""
+    _, distance, bearing, _ = self._observed_target(obs)
+    if not (distance < self.switch_distance):
+      return False
+    return self.kind == 'b1' or abs(bearing) <= self.heading_rad
+
+  def observed_goal_distance(self, obs):
+    return float(self._observed_target(obs)[1])
+
+  def _goal_xy(self, obs):
+    direction, distance, _, _ = self._observed_target(obs)
+    body_xy = np.asarray(direction[:2], np.float64)
+    norm = float(np.linalg.norm(body_xy))
+    if not np.isfinite(distance) or norm < 1e-6:
+      return None
+    rel_b = np.array([*(body_xy / norm * distance), 0.0])
+    return self.env.backend.base_pos() + self.env.backend.R_body() @ rel_b
+
+  def _nav(self, obs):
+    target = self._goal_xy(obs)
+    if target is None:
+      return expert.nav_action()
+    state = self.env.backend.state
+    pos = np.array([state.x, state.y], np.float64)
+    target_xy = np.asarray(target[:2], np.float64)
+    # Reuse the expert's GridPlanner and pure-pursuit path follower. Only the
+    # destination changes: it is the observed goal point, not a stance pose.
+    if (self.path is None or self.path_target is None or
+        np.linalg.norm(target_xy - self.path_target) > 0.08):
+      self.planner.solve_from(pos)
+      self.path = self.planner.path_to(target_xy)
+      if self.path is None:
+        # Object and place centers can lie inside furniture occupied cells.
+        # Keep the observed goal as the navigation target and use the closest
+        # reachable free cell only as the planner's final waypoint.
+        candidates = []
+        for radius in np.arange(0.05, 1.21, 0.05):
+          for angle in np.linspace(0.0, 2.0 * math.pi, 32, endpoint=False):
+            candidate = target_xy + radius * np.array([math.cos(angle), math.sin(angle)])
+            if self.planner.free(candidate) and np.isfinite(self.planner.dist_to(candidate)):
+              candidates.append((float(np.linalg.norm(candidate - target_xy)), candidate))
+          if candidates:
+            break
+        if candidates:
+          _, waypoint = min(candidates, key=lambda item: item[0])
+          self.path = self.planner.path_to(waypoint)
+      self.path_target = target_xy.copy()
+    if self.path is None:
+      return expert.nav_action()
+    vx, wz, _ = planning.pure_pursuit(
+        pos, state.yaw, self.path, lookahead=0.3, vmax=0.5)
+    vx, vy, wz = self.expert._safe(vx, 0.0, wz)
+    return expert.nav_action(vx=vx, vy=vy, wz=wz)
+
+  def _plan_at_current_base(self, obs):
+    direction, _, _, holding = self._observed_target(obs)
+    backend, scene, state = self.env.backend, self.env.scene, self.env.backend.state
+    base = np.array([state.x, state.y, state.yaw], np.float64)
+    if holding:
+      center = scene.place_point(scene.obj.half[2])
+      R_w = kb.R_DEFAULT.copy()
+      pre, goal, post = expert.place_targets(scene, center, R_w, state.obj_offset)
+      h = expert.plan_at_base(backend, 'place', base, R_w, pre, goal, post,
+                              True, state.obj_offset)
+      kind, index = 'place', 0
+    else:
+      # The observed body-frame direction chooses the gripper approach axis;
+      # no candidate/staging search is performed for either baseline.
+      d = backend.R_body() @ np.asarray(direction, np.float64)
+      d[2] = 0.0
+      if np.linalg.norm(d) < 1e-6:
+        d = np.array([math.cos(state.yaw), math.sin(state.yaw), 0.0])
+      d /= np.linalg.norm(d)
+      R_w = expert.grasp_frame(d, state.yaw)
+      pre, goal, post = expert.pick_targets(state.obj_center, d, False)
+      h = expert.plan_at_base(backend, 'pick', base, R_w, pre, goal, post)
+      kind, index = 'pick', 0
+    if h is None:
+      h = float(state.h)
+    return expert.ManipPlan(kind, base, h, R_w, pre, goal, post,
+                            -R_w[:, 0][:2], index, way_w=())
+
+  def __call__(self, obs):
+    if self.ctrl is not None:
+      action, status = self.ctrl.step(self.env.backend)
+      if status == 'running':
+        return action
+      self.ctrl = None
+      # A failed manipulation returns to NAV and retries at the same observed
+      # threshold; the expert's failure recovery is intentionally not called.
+      if status == 'done':
+        return expert.nav_action()
+    if self.should_switch(obs):
+      self.ctrl = expert.ManipController(self._plan_at_current_base(obs))
+      action, status = self.ctrl.step(self.env.backend)
+      if status == 'running':
+        return action
+      self.ctrl = None
+    return self._nav(obs)
+
+
 def _summary(rows, split, scene_type, seed=0, affordance_source=None,
              scene_filter=None, seeds_considered=0, seeds_rejected=0):
   rows = list(rows)
@@ -154,28 +309,40 @@ def _checkpoint_path(path):
   return path
 
 
-def _episode(agent, env, seed, split, online_k, rng):
+def _episode(agent, env, seed, split, online_k, rng, baseline=None):
   _set_forced_seed(env, seed)
   reset = {key: np.zeros(space.shape, space.dtype) for key, space in env.act_space.items()}
   reset['reset'] = np.bool_(True)
   obs = env.step(reset)
-  carry = agent.init_policy(1)
+  carry = agent.init_policy(1) if agent is not None else None
+  if baseline is not None:
+    baseline.reset(seed=int(rng.integers(2 ** 31)))
   skills, affs = [], []
   prev_skill = None
   path_length = 0.0
   switches = 0
   grasp_attempts = 0
   steps = 0
+  min_observed_goal_distance = float('inf')
+  switched_before_terminal = False
   labeler = labeler_lib.AffordanceLabeler(k_rollouts=online_k, seed=int(rng.integers(2 ** 31))) if online_k else None
   while True:
-    policy_obs = {key: np.asarray(value)[None] for key, value in obs.items()
-                  if not key.startswith('log/')}
-    carry, acts, _ = agent.policy(carry, policy_obs, mode='eval')
-    action = _as_action(acts)
+    if baseline is None:
+      policy_obs = {key: np.asarray(value)[None] for key, value in obs.items()
+                    if not key.startswith('log/')}
+      carry, acts, _ = agent.policy(carry, policy_obs, mode='eval')
+      action = _as_action(acts)
+    else:
+      action = baseline(obs)
+      if not switched_before_terminal:
+        min_observed_goal_distance = min(
+            min_observed_goal_distance, baseline.observed_goal_distance(obs))
     action['reset'] = np.bool_(False)
     skill = int(action['skill'])
     skills.append(skill)
     entering = (prev_skill == int(I.Skill.NAV) and skill in (int(I.Skill.PICK), int(I.Skill.PLACE)))
+    if entering and not switched_before_terminal:
+      switched_before_terminal = True
     if entering:
       if labeler is not None:
         # rate() snapshots/restores the backend around its K rollout trials.
@@ -210,6 +377,10 @@ def _episode(agent, env, seed, split, online_k, rng):
       row._n_skill_entries = sum(
           prev == int(I.Skill.NAV) and cur in (int(I.Skill.PICK), int(I.Skill.PLACE))
           for prev, cur in zip(skills, skills[1:]))
+      row._min_observed_goal_distance = (
+          None if not np.isfinite(min_observed_goal_distance)
+          else float(min_observed_goal_distance))
+      row._switched_before_terminal = bool(switched_before_terminal)
       return row
 
 
@@ -230,22 +401,20 @@ def eval_legmm(make_agent, make_env, make_logger, args, config=None):
   logdir = pathlib.Path(str(config.logdir))
   logdir.mkdir(parents=True, exist_ok=True)
   rows_path = logdir / 'episodes.jsonl'
-  agent = make_agent()
+  policy_name = str(getattr(config.eval, 'policy', 'agent')).lower()
+  if policy_name not in ('agent', 'b1', 'b2'):
+    raise ValueError(f'unknown eval.policy: {policy_name!r}')
+  agent = make_agent() if policy_name == 'agent' else None
   from_checkpoint = getattr(args, 'from_checkpoint', '')
-  if from_checkpoint:
+  if from_checkpoint and agent is not None:
     def load_agent(data):
-      # WM checkpoints created before the return-normalizer state was added
-      # legitimately lack these two runtime scalars. Keep the fresh values
-      # while retaining strict shape/key checks for model parameters.
-      params = dict(data['params'])
-      for key in set(agent.params) - set(params):
-        if key.startswith('retnorm/'):
-          params[key] = np.zeros_like(np.asarray(agent.params[key]))
-      agent.load({**data, 'params': params},
-                 regex=getattr(args, 'from_checkpoint_regex', '') or None)
+      agent.load(data, regex=getattr(args, 'from_checkpoint_regex', '') or None)
     elements.checkpoint.load(_checkpoint_path(from_checkpoint), {
         'agent': load_agent})
   env = make_env(0, split=split)
+  baseline = (BaselinePolicy(
+      policy_name, env, heading_deg=float(getattr(config.eval, 'baseline_heading_deg', 30.0)))
+              if policy_name != 'agent' else None)
   rng = np.random.default_rng(int(config.seed))
   rows = []
   episode_seconds = []
@@ -253,12 +422,17 @@ def eval_legmm(make_agent, make_env, make_logger, args, config=None):
   with rows_path.open('w') as stream:
     for seed in seeds:
       episode_start = time.perf_counter()
-      row = _episode(agent, env, seed, split, online_k, rng)
+      row = _episode(agent, env, seed, split, online_k, rng, baseline=baseline)
       elapsed = time.perf_counter() - episode_start
       episode_seconds.append(float(elapsed))
       rows.append(row)
       row_json = dataclasses.asdict(row)
       row_json['affordance_source'] = 'online_labeler_rollouts' if online_k else 'aff_geom'
+      row_json['min_observed_goal_distance'] = row._min_observed_goal_distance
+      row_json['switched_before_terminal'] = row._switched_before_terminal
+      row_json['below_switch_distance'] = bool(
+          row._min_observed_goal_distance is not None and
+          row._min_observed_goal_distance < (baseline.switch_distance if baseline else 0.75))
       stream.write(json.dumps(row_json, sort_keys=True) + '\n')
       stream.flush()
   env.close()

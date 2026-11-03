@@ -387,9 +387,18 @@ class Agent(embodied.Agent):
         # optimizer bookkeeping.  Every model parameter must still be present;
         # silently accepting any other mismatch would make a resumed run
         # impossible to audit.
-        allowed = lambda key: key.startswith('agent_step') or key.startswith('opt/') or key.startswith('optimizer/')
-        bad_missing = [k for k in missing if not allowed(k)]
-        bad_unexpected = [k for k in unexpected if not allowed(k)]
+        # Runtime normalizers are created lazily by imagination. WM and BC
+        # phases skip imagination, so their checkpoints legitimately omit the
+        # normalizer state that RL/online agents initialize.
+        allowed_missing = lambda key: (
+            key.startswith('agent_step') or key.startswith('opt/') or
+            key.startswith('optimizer/') or key.startswith('retnorm/') or
+            key.startswith('valnorm/') or key.startswith('advnorm/'))
+        allowed_unexpected = lambda key: (
+            key.startswith('agent_step') or key.startswith('opt/') or
+            key.startswith('optimizer/'))
+        bad_missing = [k for k in missing if not allowed_missing(k)]
+        bad_unexpected = [k for k in unexpected if not allowed_unexpected(k)]
         if bad_missing or bad_unexpected:
           raise KeyError(
               f'Checkpoint parameter mismatch; missing={bad_missing}, '

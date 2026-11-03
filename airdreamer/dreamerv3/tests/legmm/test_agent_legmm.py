@@ -9,10 +9,10 @@ from dreamerv3.agent import Agent
 
 def make_legmm_agent(rec_scales=None, skill_enabled=None,
                      rec_per_pixel_norm=True, train_phase=None, bc=None,
-                     batch_length=3):
+                     batch_length=3, jax_jit=False):
   config = load_config(['legmm', 'sizetest'], [
       '--jax.platform=cpu',
-      '--jax.policy_devices=0', '--jax.train_devices=0', '--jax.jit=False'])
+      '--jax.policy_devices=0', '--jax.train_devices=0', f'--jax.jit={jax_jit}'])
   config = config.update({'agent': {
       'rec_per_pixel_norm': rec_per_pixel_norm},
       'batch_size': 2, 'batch_length': batch_length})
