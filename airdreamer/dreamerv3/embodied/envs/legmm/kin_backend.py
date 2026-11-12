@@ -129,6 +129,9 @@ class KinBackend:
     self.L2 = float(arm.get('fore', FORE))
     self.tool = float(arm.get('tool', TOOL))
     self.cap = float(cfg.get('manip_base_speed_cap', 0.15))
+    # v4 (legmm_ag) overrides; the defaults reproduce the module constants exactly.
+    self.stow_rel = np.asarray(cfg.get('stow_rel', STOW_REL), np.float64)
+    self.grasp_p = float(cfg.get('grasp_p', GRASP_P))
     self.hl_dt = 1.0 / float(cfg.get('hl_hz', I.HL_HZ))
     self.cams = {}
     for name in ('head', 'wrist'):
@@ -157,7 +160,7 @@ class KinBackend:
     x, y, yaw = scene.start
     self.state = KinState(
         x=float(x), y=float(y), yaw=float(yaw), h=I.BASE_HEIGHT_RANGE[1], pitch=0.0,
-        v=np.zeros(3), ee_b=self.shoulder_b + STOW_REL, R_ee_b=R_STOW.copy(), grip=1.0, grip_closed=False,
+        v=np.zeros(3), ee_b=self.shoulder_b + self.stow_rel, R_ee_b=R_STOW.copy(), grip=1.0, grip_closed=False,
         obj_center=scene.obj.center.copy(), obj_R=scene.obj.R.copy())
     self._static = scene.boxes
     return self.state
@@ -360,7 +363,7 @@ class KinBackend:
       s.R_ee_b = geo.orthonormalize(R_new)
       s.ee_b = self.clip_ee(s.ee_b + dee_pos, s)
     else:
-      target = self.shoulder_b + (CARRY_REL if s.holding else STOW_REL)
+      target = self.shoulder_b + (CARRY_REL if s.holding else self.stow_rel)
       if s.ee_b[2] < target[2] - 0.02:
         # Raise straight up first: pulling a low TCP straight back sweeps the
         # forearm through the body/head and can block the arm forever.
@@ -451,7 +454,8 @@ class KinBackend:
     cos = self.scene.dirs[self.scene.approach] @ (-approach)
     ok_dir = bool((cos > math.cos(GRASP_ANGLE)).any())
     ok_free = not self.arm_collides(s)
-    if ok_dist and ok_width and ok_dir and ok_free and self.rng.random() < GRASP_P:
+    if ok_dist and ok_width and ok_dir and ok_free and (
+        self.grasp_p >= 1.0 or self.rng.random() < self.grasp_p):
       s.holding = s.picked = True
       s.obj_offset = R.T @ (s.obj_center - p)
       s.obj_R_rel = R.T @ s.obj_R

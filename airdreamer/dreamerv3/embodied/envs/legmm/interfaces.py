@@ -386,3 +386,96 @@ def false_trigger(skill_seq: np.ndarray, aff_seq: np.ndarray, thr: float = 0.2) 
   s = np.asarray(skill_seq); a = np.asarray(aff_seq)
   enter = np.where((s[1:] != int(Skill.NAV)) & (s[:-1] == int(Skill.NAV)))[0] + 1
   return int(np.sum(a[enter] < thr))
+
+
+# ---------------------------------------------------------------------------
+# 9. v4 active grasp (task legmm_ag, version legmm_ag_v1). Additive: nothing above changes.
+#    Actions {reset, nav(3), trigger(discrete 2)}; goal = position fields only (no yaw, no place).
+# ---------------------------------------------------------------------------
+AG_VERSION = 'legmm_ag_v1'
+
+AG_NAV_LAYOUT = {            # same ranges as NAV_LAYOUT without the body-height dimension
+    'vx': (slice(0, 1), -0.8, 0.8),
+    'vy': (slice(1, 2), -0.4, 0.4),
+    'wz': (slice(2, 3), -1.0, 1.0),
+}
+AG_NAV_DIM = 3
+TRIGGER_CONTINUE, TRIGGER_GRASP = 0, 1
+
+AG_GOAL_LAYOUT = {           # float32 (6,)
+    'pick_dir_b': slice(0, 3),
+    'pick_dxy':   slice(3, 4),
+    'pick_dz':    slice(4, 5),
+    'pick_valid': slice(5, 6),
+}
+AG_GOAL_DIM = 6
+
+# Replay-only keys of legmm_ag. They are excluded from the encoder and decoder through
+# agent.label_keys: the feasibility label (+ mask) and the two reward parts that are
+# recombined at training time as reward = rew_task + lambda * rew_qshape.
+AG_LABEL_KEYS = ('label_feas', 'label_feas_mask', 'rew_task', 'rew_qshape')
+AG_TERM_REASONS = ('none', 'success', 'skill_fail', 'timeout', 'nan')
+
+
+def make_ag_act_space():
+  """env.act_space of legmm_ag (includes 'reset'; make_agent drops it)."""
+  import elements
+  return {
+      'reset':   elements.Space(bool),
+      'nav':     elements.Space(np.float32, (AG_NAV_DIM,), -1.0, 1.0),
+      'trigger': elements.Space(np.int32, (), 0, 2),
+  }
+
+
+def make_ag_obs_space(depth_dtype=np.uint8):
+  import elements
+  f32 = np.float32
+  return {
+      'depth_head':  elements.Space(depth_dtype, (DEPTH_H, DEPTH_W, 1)),
+      'depth_wrist': elements.Space(depth_dtype, (DEPTH_H, DEPTH_W, 1)),
+      'proprio':     elements.Space(f32, (PROPRIO_DIM,)),
+      'goal':        elements.Space(f32, (AG_GOAL_DIM,)),
+      'label_feas':      elements.Space(f32),      # counterfactual trigger outcome in {0, 1}
+      'label_feas_mask': elements.Space(f32),      # 1 = label exists (inside the safety gate and sampled)
+      'rew_task':    elements.Space(f32),          # outcome + invalid + collision + time + distance shaping
+      'rew_qshape':  elements.Space(f32),          # q* potential difference (weight lambda applied at train time)
+      'reward':      elements.Space(f32),          # rew_task + 1.0 * rew_qshape (reference; the agent recomputes it)
+      'is_first':    elements.Space(bool),
+      'is_last':     elements.Space(bool),
+      'is_terminal': elements.Space(bool),
+      'log/term_reason':   elements.Space(np.int32, (), 0, len(AG_TERM_REASONS)),
+      'log/success':       elements.Space(f32),
+      'log/triggered':     elements.Space(f32),    # a trigger action was sent (any gate outcome)
+      'log/invalid':       elements.Space(f32),    # invalid trigger (gate failed or slid out)
+      'log/slid_out':      elements.Space(f32),
+      'log/gate_ok':       elements.Space(f32),    # gate state of this observation, read from the target estimate
+      'log/gate_ok_true':  elements.Space(f32),    # the same gate on the true object position (diagnostic only)
+      'log/gate_mismatch': elements.Space(f32),    # gate(estimate) != gate(truth) at this observation
+      'log/trig_gate_true_ok':  elements.Space(f32),   # on trigger steps: true-position gate of the decision state
+      'log/trig_gate_mismatch': elements.Space(f32),   # on trigger steps: gate(estimate) != gate(truth)
+      'log/collision':     elements.Space(f32),    # 1 on every step in contact
+      'log/collision_start': elements.Space(f32),  # 1 on the step a contact begins (the only one charged)
+      'log/no_plan':       elements.Space(f32),
+      'log/contract_violation': elements.Space(f32),
+      'log/contract_dist': elements.Space(f32),
+      'log/contract_bearing': elements.Space(f32),
+      'log/contract_height': elements.Space(f32),
+      'log/contract_clearance': elements.Space(f32),
+
+      'log/settle_steps':  elements.Space(f32),
+      'log/settle_s':      elements.Space(f32),
+      'log/skill_steps':   elements.Space(f32),
+      'log/skill_s':       elements.Space(f32),    # physical (simulated) time
+      'log/skill_wall_s':  elements.Space(f32),    # wall clock of planning + execution
+      'log/label_wall_s':  elements.Space(f32),
+      'log/base_disp':     elements.Space(f32),
+      'log/phi_dist':      elements.Space(f32),
+      'log/phi_q':         elements.Space(f32),
+      'log/q_star':        elements.Space(f32),
+      'log/shoulder_dist': elements.Space(f32),    # shoulder-object distance from the estimate
+      'log/shoulder_dist_true': elements.Space(f32),
+      'log/blocked':       elements.Space(f32),
+      'log/flat':          elements.Space(f32),
+      'log/solvable':      elements.Space(f32),    # -1 = not computed
+      'log/seed':          elements.Space(np.int32, (), 0, 2 ** 31 - 1),
+  }

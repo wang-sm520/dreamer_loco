@@ -43,7 +43,7 @@ class MLPHead(nj.Module):
 
 class DictHead(nj.Module):
 
-  def __init__(self, spaces, outputs, **kw):
+  def __init__(self, spaces, outputs, binits=None, **kw):
     assert spaces, spaces
     if not isinstance(spaces, dict):
       spaces = {'output': spaces}
@@ -52,13 +52,15 @@ class DictHead(nj.Module):
     assert spaces.keys() == outputs.keys(), (spaces, outputs)
     self.spaces = spaces
     self.outputs = outputs
+    self.binits = dict(binits or {})   # optional per-key bias initializer (legmm_ag trigger head)
     self.kw = kw
 
   def __call__(self, x):
     outputs = {}
     for key, impl in self.outputs.items():
       space = self.spaces[key]
-      outputs[key] = self.sub(key, Head, space, impl, **self.kw)(x)
+      kw = dict(self.kw, binit=self.binits[key]) if key in self.binits else self.kw
+      outputs[key] = self.sub(key, Head, space, impl, **kw)(x)
     return outputs
 
 

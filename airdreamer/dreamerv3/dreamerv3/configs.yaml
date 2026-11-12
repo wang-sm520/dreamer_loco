@@ -332,6 +332,54 @@ defaults:
         arm_latency_steps: [0, 1]
         object_friction: [0.4, 1.2]
 
+    # legmm_ag: v4 active grasp (A2 + AIRBOT, tabletop, frozen fixed-base grasp skill; kin surrogate
+    # until the Isaac skill exists). Version legmm_ag_v1. Same key rule as legmm: no key segment may
+    # start with depth/units/layers/rssm/bins.
+    legmm_ag:
+      contract: legacy              # legacy | true_state (evaluation opt-in only)
+      version: legmm_ag_v1
+      backend: kin
+      spaces_only: False
+      hl_hz: 5
+      physics_dt: 0.005
+      max_episode_steps: 450
+      horizon: 333                  # overwritten by agent.horizon in make_env (gamma = 1 - 1/horizon)
+      split: train                  # train | val | test
+      use_seed: True
+      room_size: [8.0, 8.0]
+      scene: {table_height: [0.50, 0.65], table_width: [0.6, 1.2], table_depth: [0.6, 1.0],
+              edge_dist: [0.05, 0.25], p_blocked: 0.5, p_wall: 0.5, blocker_thick: [0.3, 0.5],
+              blocker_height: [0.8, 1.3], blocker_overhang: [0.1, 0.4], clutter: [3, 8], start_min_dist: 1.5}
+      object: {flat_frac: 0.7, flat: {thick: [0.03, 0.05], wide: [0.10, 0.14], height: [0.12, 0.15]},
+               cyl: {diameter: [0.04, 0.07], height: [0.08, 0.20]}}
+      scene_filter: solvable        # train/val resample unsolvable layouts inside the stratum; tests stay raw
+      scene_filter_max_attempts: 100
+      record_solvable: True         # tests: record whether each scene is solvable (log/solvable)
+      solvable_margin: 0.01         # solvability needs a stance 1 cm / 3 deg inside the gate (feasible_stances margin)
+      stow_rel: [0.36, 0.0, 0.0]    # STOW TCP forward of the shoulder (legmm_mm keeps 0.33)
+      gate: {dist: [0.45, 0.70], bearing_deg: 45.0, height: [0.50, 0.65], speed: 0.3}
+      settle: {lin: 0.05, ang: 0.1, max_s: 1.5}
+      # grasp_p 1.0 = deterministic geometric check; 0.92 = kin's stochastic check. Either way this
+      # surrogate's success rate is NOT a real grasp success rate.
+      skill: {twist_deg: 15.0, lift: 0.06, hold_s: 2.0, max_s: 15.0, grasp_p: 1.0}
+      reward: {success: 20.0, fail: 5.0, invalid: 0.1, collision: 2.0, time: 0.01, w_dist: 2.0, w_q: 5.0}
+      labels: {rate: 0.25, terminal: False, seed: 0}   # counterfactual feasibility labels, inside the gate only
+      camera_head:  {model: d435i, min_z: 0.195, max_z: 6.0, mount_xyz: [0.35, 0.0, 0.08], mount_pitch_deg: 0.0}
+      camera_wrist: {model: d405, min_z: 0.07, max_z: 1.0, mount_xyz: [-0.127, 0.0, 0.1115], mount_pitch_deg: -31.6}
+      obs_depth_dtype: uint8
+      goal_provider: {pos_sigma: 0.03, latency_steps: [0, 2], dropout: 0.05}   # target position only
+      arm: {mount_xyz: [0.03, 0.0, 0.095], shoulder_z: 0.1172, upper: 0.27009, fore: 0.29015, tool: 0.241, payload: 1.5}
+      base: {footprint: [0.82, 0.44], vel_tau: 0.15, posture_tau: 0.4}
+      manip_base_speed_cap: 0.15
+      domain_rand:
+        enabled: True
+        cam_noise_a: [0.001, 0.004]
+        cam_hole_frac: [0.0, 0.03]
+        cam_extrinsic_sigma: {pos: 0.01, rot_deg: 1.5}
+        base_vel_tracking_err: 0.1
+        arm_latency_steps: [0, 1]
+        object_friction: [0.4, 1.2]
+
   # Offline datasets and legmm evaluation
   offline: {dir: '', copy_to_replay: True, eval_every: 5000}
   eval: {episodes: 200, video_episodes: 6, online_aff_rollouts: 4, scene_types: '', scene_filter: auto,
@@ -446,6 +494,11 @@ defaults:
     skill_prior: {scale: 0.0, scale_end: 0.0, anneal_steps: 1, eps: 0.05}  # rl phase: 1.0 -> 0.1
     switch_cost: 0.0               # legmm: 0.2, penalises skill changes in imagination
     deliberation: {enabled: False, delays: [0, 5, 10], samples: 8, horizon: 30, margin: 0.3}  # eval only
+    # legmm_ag switches (v4). All off here, so drone / legmm_mm are unchanged.
+    feas_head: {enabled: False, scale: 1.0, layers: 2, units: 512}   # aux: P(trigger now succeeds); masked BCE, not a policy input
+    qstar: {mode: off, window: 200, lo: 0.2, hi: 0.5}   # off | anneal | fixed | none: reward = rew_task + lambda * rew_qshape
+    trigger_bias: {enabled: False, key: trigger, init: [0.0, -3.0]}  # initial logits of the discrete trigger head ("continue" first)
+    smooth_skip_discrete: False    # True: the action-smoothness penalty skips discrete action heads
 
 # Model size presets
 sizetest: &sizetest
@@ -563,6 +616,41 @@ legmm: &legmm
     aff_head: {enabled: True}
     phase_head: {enabled: True}
     switch_cost: 0.2
+
+# legmm_ag: v4 active grasp. Standalone (not stacked on `legmm`): same model/run settings as `legmm`, with the
+# skill head, aff/phase heads, BC, skill prior and switch cost off. Usage: --configs legmm_ag size1m legmm_debug
+legmm_ag: &legmm_ag
+  <<: *size50m
+  task: legmm_ag
+  batch_size: 16
+  batch_length: 128
+  report_length: 32
+  replay_context: 16
+  replay: {size: 1e6, online: True}
+  run: {envs: 32, eval_envs: 8, train_ratio: 32, steps: 3e6, log_every: 120, save_every: 900, debug: False}
+  jax: {platform: cuda, policy_devices: [0], train_devices: [0]}
+  env.legmm_ag: {backend: kin}
+  agent:
+    imag_length: 30
+    horizon: 333
+    loss_scales: {rec: 1.0, rew: 1.0, con: 1.0, dyn: 1.0, rep: 0.1, policy: 1.0, value: 1.0, repval: 0.3}
+    label_keys: [label_feas, label_feas_mask, rew_task, rew_qshape]
+    rec_scales: 'depth_head=1.0,depth_wrist=1.0,proprio=2.0,goal=2.0'
+    rec_per_pixel_norm: True
+    skill: {enabled: False}
+    aff_head: {enabled: False}
+    phase_head: {enabled: False}
+    bc: {scale: 0.0, scale_end: 0.0, anneal_steps: 1}
+    skill_prior: {scale: 0.0, scale_end: 0.0, anneal_steps: 1, eps: 0.05}
+    switch_cost: 0.0
+    feas_head: {enabled: True, scale: 1.0, layers: 2, units: 512}
+    qstar: {mode: anneal, window: 200, lo: 0.2, hi: 0.5}
+    trigger_bias: {enabled: True, key: trigger, init: [0.0, -3.0]}
+    smooth_skip_discrete: True
+legmm_ag_noq:           # pure no-q*: lambda = 0 always (stack after legmm_ag)
+  agent.qstar.mode: none
+legmm_ag_fixedq:        # fixed q*: lambda = 1 always
+  agent.qstar.mode: fixed
 
 legmm_wm:
   agent.train_phase: wm

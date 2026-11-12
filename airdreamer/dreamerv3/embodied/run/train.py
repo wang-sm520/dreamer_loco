@@ -19,6 +19,25 @@ def _save_openloop_video(frames, path, fps=4):
     print(f'[Video] Failed to save {path}: {e}')
 
 
+class AgContractMetrics:
+  """Counts per logging interval; violations can overlap across contract components."""
+
+  def __init__(self):
+    self.counts = collections.Counter()
+
+  def on_step(self, tran, *args):
+    self.counts['episodes'] += int(bool(tran['is_last']))
+    for key in ('violation', 'dist', 'bearing', 'height', 'clearance'):
+      self.counts[key] += int(tran['log/contract_' + key])
+
+  def result(self):
+    counts = self.counts
+    self.counts = collections.Counter()
+    return dict(episodes=counts['episodes'], violation_count=counts['violation'],
+                violation_rate=counts['violation'] / max(counts['episodes'], 1),
+                **{key + '_count': counts[key] for key in ('dist', 'bearing', 'height', 'clearance')})
+
+
 def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
 
   agent = make_agent()
@@ -36,6 +55,8 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
   )
   if str(getattr(args, 'task', '')).startswith('legmm_'):
     from embodied.envs.legmm.interfaces import TERM_REASONS as term_reason_names
+  if str(getattr(args, 'task', '')) == 'legmm_ag':
+    from embodied.envs.legmm.interfaces import AG_TERM_REASONS as term_reason_names
   policy_fps = elements.FPS()
   train_fps = elements.FPS()
 
@@ -114,10 +135,30 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
   driver.on_step(lambda tran, _: policy_fps.step())
   driver.on_step(replay.add)
   driver.on_step(logfn)
+  contract_metrics = AgContractMetrics() if task_name == 'legmm_ag' else None
+  if contract_metrics is not None:
+    driver.on_step(contract_metrics.on_step)
   
 
-  stream_train = iter(agent.stream(make_stream(replay, 'train')))
-  stream_report = iter(agent.stream(make_stream(replay, 'report')))
+  # legmm_ag: the weight lambda of the q* shaping term comes from the success rate of recent real
+  # episodes (this process only) and is injected into every batch as qstar_lam.
+  qlam = None
+  qcfg = getattr(args, 'qstar', None)
+  if qcfg is not None and str(qcfg.mode) != 'off':
+    from embodied.run.qlam import QLambda
+    qlam = QLambda(str(qcfg.mode), int(qcfg.window), float(qcfg.lo), float(qcfg.hi))
+    driver.on_step(qlam.on_step)
+
+  def with_lambda(stream):
+    if qlam is None:
+      return stream
+    def inject(batch):
+      batch['qstar_lam'] = np.full(batch['is_first'].shape, qlam.lam, np.float32)
+      return batch
+    return embodied.streams.Map(stream, inject)
+
+  stream_train = iter(agent.stream(with_lambda(make_stream(replay, 'train'))))
+  stream_report = iter(agent.stream(with_lambda(make_stream(replay, 'report'))))
 
   #carry_train->内部状态（carry state）：在序列处理中保持上下文（如RNN的隐藏状态）?
   carry_train = [agent.init_train(args.batch_size)]
@@ -143,7 +184,8 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
   if args.from_checkpoint:
     elements.checkpoint.load(args.from_checkpoint, dict(
         agent=bind(agent.load, regex=args.from_checkpoint_regex)))
-  cp.load_or_save()
+  from embodied.run.qlam import load_or_save_training_checkpoint
+  load_or_save_training_checkpoint(cp, qlam)
   last_save_step = int(step)
 
   print('Start training loop')
@@ -166,10 +208,14 @@ def train(make_agent, make_replay, make_env, make_stream, make_logger, args):
     if should_log(step):
       logger.add(train_agg.result())
       logger.add(epstats.result(), prefix='epstats')
+      if contract_metrics is not None:
+        logger.add(contract_metrics.result(), prefix='contract')
       logger.add(replay.stats(), prefix='replay')
       logger.add(usage.stats(), prefix='usage')
       logger.add({'fps/policy': policy_fps.result()})
       logger.add({'fps/train': train_fps.result()})
+      if qlam is not None:
+        logger.add(qlam.stats(), prefix='qstar')
       logger.add({'timer': elements.timer.stats()['summary']})
       logger.write()
 

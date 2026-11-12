@@ -66,6 +66,26 @@ def skill_prior_jax(aff_pick, aff_place, p_holding, eps=0.05):
 skill_prior_jnp = skill_prior_jax
 
 
+class ConstInit:
+  """Bias initializer with fixed values (legmm_ag: initial logits of the discrete trigger head)."""
+
+  def __init__(self, values):
+    self.values = tuple(float(v) for v in values)
+
+  def __call__(self, shape, dtype=f32, fshape=None):
+    shape = (shape,) if isinstance(shape, int) else tuple(shape)
+    assert shape == (len(self.values),), (shape, self.values)
+    return jnp.asarray(self.values, dtype)
+
+  def __repr__(self):
+    return f'ConstInit{self.values}'
+
+
+def compose_reward(data):
+  """legmm_ag: reward = rew_task + lambda * rew_qshape, lambda per batch (key qstar_lam)."""
+  return f32(data['rew_task']) + f32(data['qstar_lam']) * f32(data['rew_qshape'])
+
+
 class Agent(embodied.jax.Agent):
 
   banner = [
@@ -125,8 +145,16 @@ class Agent(embodied.jax.Agent):
     d1, d2 = config.policy_dist_disc, config.policy_dist_cont
     outs = {k: d1 if v.discrete else d2 for k, v in act_space.items()}
     #创建Policy Head
+    pol_kw = {}
+    if config.trigger_bias.enabled:
+      tkey = str(config.trigger_bias.key)
+      assert tkey in act_space and act_space[tkey].discrete, (tkey, act_space)
+      pol_kw['binits'] = {tkey: ConstInit(config.trigger_bias.init)}
     self.pol = embodied.jax.MLPHead(
-        act_space, outs, **config.policy, name='pol')
+        act_space, outs, **config.policy, **pol_kw, name='pol')
+    self._smooth_skip = tuple(
+        k for k, v in act_space.items() if v.discrete
+    ) if config.smooth_skip_discrete else ()
     
     #普通值函数（self.val）和慢值函数（self.slowval）
     self.val = embodied.jax.MLPHead(scalar, **config.value, name='val')
@@ -161,6 +189,24 @@ class Agent(embodied.jax.Agent):
       self.phase = embodied.jax.MLPHead(
           phase_space, output='categorical', **kw, name='phase')
 
+    # legmm_ag feasibility head: one sigmoid logit, P(triggering now succeeds). Auxiliary loss only
+    # (masked BCE, gradients reach the world model like the aff head); never a policy input.
+    self.feas = None
+    if config.feas_head.enabled:
+      kw = dict(config.feas_head)
+      kw.pop('enabled', None)
+      self.feas_scale = float(kw.pop('scale', 1.0))
+      self.feas = embodied.jax.MLPHead(binary, output='binary', **kw, name='feas')
+
+    # legmm_ag: reward = rew_task + lambda * rew_qshape, lambda injected per batch by the train loop.
+    self._qstar = str(config.qstar.mode) != 'off'
+    if self._qstar:
+      missing = {'rew_task', 'rew_qshape'} - set(obs_space)
+      if missing:
+        raise ValueError(f'agent.qstar.mode={config.qstar.mode} needs obs keys {sorted(missing)}')
+      if config.qstar.mode not in ('anneal', 'fixed', 'none'):
+        raise ValueError(f'unknown agent.qstar.mode: {config.qstar.mode}')
+
     if self._skill_prior_enabled and (self.aff is None or self.phase is None):
       raise ValueError(
           'skill_prior requires both aff_head.enabled and phase_head.enabled')
@@ -171,6 +217,8 @@ class Agent(embodied.jax.Agent):
       self.modules.append(self.aff)
     if self.phase is not None:
       self.modules.append(self.phase)
+    if self.feas is not None:
+      self.modules.append(self.feas)
     #定义了强化学习模型的优化器（Optimizer），用于训练模型的所有可训练参数
     self.opt = embodied.jax.Optimizer(
         self.modules, self._make_opt(**config.opt), summary_depth=1,
@@ -199,6 +247,8 @@ class Agent(embodied.jax.Agent):
       scales['aff'] = self.aff_scale
     if self.phase is not None:
       scales['phase'] = self.phase_scale
+    if self.feas is not None:
+      scales['feas'] = self.feas_scale
     if self._bc_enabled:
       scales['bc'] = 1.0
     if self._skill_prior_enabled and self._imag_enabled:
@@ -236,6 +286,8 @@ class Agent(embodied.jax.Agent):
     spaces = {}
     spaces['consec'] = elements.Space(np.int32)
     spaces['stepid'] = elements.Space(np.uint8, 20)
+    if self._qstar:
+      spaces['qstar_lam'] = elements.Space(np.float32)   # injected by the train loop
     if self.config.replay_context:
       spaces.update(elements.tree.flatdict(dict(
           enc=self.enc.entry_space,
@@ -360,6 +412,19 @@ class Agent(embodied.jax.Agent):
       metrics['phase_acc'] = f32(
           phase_out.pred() == obs['label_phase']).mean()
 
+    if self.feas is not None:
+      feas_logit = self.feas(repinp, 2).logit
+      labels = f32(obs['label_feas'])
+      mask = f32(obs['label_feas_mask'])
+      bce = soft_bce_logits(feas_logit, labels)
+      denom = jnp.maximum(mask.sum(), 1.0)
+      feas_mean = (mask * bce).sum() / denom
+      losses['feas'] = jnp.ones((B, T), f32) * feas_mean
+      correct = (jax.nn.sigmoid(feas_logit) >= 0.5) == (labels >= 0.5)
+      metrics['feas_acc'] = (f32(correct) * mask).sum() / denom
+      metrics['feas_label_rate'] = mask.mean()
+      metrics['feas_label_pos'] = (labels * mask).sum() / denom
+
     if self._bc_enabled:
       # _apply_replay_context makes prevact[t+1] the action stored alongside
       # obs[t].  We therefore compare policy outputs at t=0..T-2 with
@@ -422,6 +487,7 @@ class Agent(embodied.jax.Agent):
           update=training,
           contdisc=self.config.contdisc,
           horizon=self.config.horizon,
+          smooth_skip=self._smooth_skip,
           skill_key=(self.config.skill.key if self.config.skill.enabled else None),
           action_keys=(tuple(self.config.skill.action_keys)
                        if self.config.skill.enabled else ()),
@@ -477,6 +543,8 @@ class Agent(embodied.jax.Agent):
       out['aff'] = self.aff(inp, 2).output.logit
     if self.phase is not None:
       out['phase'] = self.phase(inp, 2).pred()
+    if self.feas is not None:
+      out['feas'] = self.feas(inp, 2).logit
     out['reward'] = self.rew(inp, 2).pred()
     return out
 
@@ -602,6 +670,8 @@ class Agent(embodied.jax.Agent):
     (enc_carry, dyn_carry, dec_carry, prevact) = carry
     carry = (enc_carry, dyn_carry, dec_carry)
     stepid = data['stepid']
+    if self._qstar:
+      data = dict(data, reward=compose_reward(data))
     obs = {k: data[k] for k in self.obs_space}
     prepend = lambda x, y: jnp.concatenate([x[:, None], y[:, :-1]], 1)
     prevact = {k: prepend(prevact[k], data[k]) for k in self.act_space}
@@ -680,6 +750,7 @@ def imag_loss(
     actent=3e-4,
     actsmooth=0.0,
     slowreg=1.0,
+    smooth_skip=(),
     skill_key=None,
     action_keys=(),
     switch_cost=0.0,
@@ -744,7 +815,7 @@ def imag_loss(
       mean_k = v.pred()
       diff = mean_k[:, 1:] - mean_k[:, :-1]
       smooths[k] = (diff ** 2).sum(axis=tuple(range(2, diff.ndim)))
-    smooth_total = sum(smooths.values())
+    smooth_total = sum(v for k, v in smooths.items() if k not in smooth_skip)
 
   for k, v in policy.items():
     if k in smooths:

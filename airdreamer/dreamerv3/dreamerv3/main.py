@@ -109,6 +109,7 @@ def main(argv=None):
       consec_report=config.consec_report,
       replay_context=config.replay_context,
       offline_dir=config.offline.dir,
+      qstar=config.agent.qstar,
   )
 
   if config.script == 'train':
@@ -194,12 +195,20 @@ def make_agent(config):
   # the authoritative space definition; the environment's ``spaces_only``
   # mode is retained for callers that need the wrapper itself.
   spaces_only = bool(getattr(config.env.legmm, 'spaces_only', False))
+  is_ag = str(config.task) == 'legmm_ag'
+  if is_ag:
+    spaces_only = bool(getattr(config.env.legmm_ag, 'spaces_only', False))
   if str(config.task).startswith('legmm_') and (config.script == 'train_offline' or spaces_only):
     from embodied.envs.legmm import interfaces as I
-    dtype = np.uint8 if str(config.env.legmm.obs_depth_dtype) == 'uint8' else np.float32
-    obs_space = {k: v for k, v in I.make_obs_space(dtype).items()
+    if is_ag:
+      dtype = np.uint8 if str(config.env.legmm_ag.obs_depth_dtype) == 'uint8' else np.float32
+      make_obs, make_act = I.make_ag_obs_space, I.make_ag_act_space
+    else:
+      dtype = np.uint8 if str(config.env.legmm.obs_depth_dtype) == 'uint8' else np.float32
+      make_obs, make_act = I.make_obs_space, I.make_act_space
+    obs_space = {k: v for k, v in make_obs(dtype).items()
                  if not k.startswith('log/')}
-    act_space = {k: v for k, v in I.make_act_space().items() if k != 'reset'}
+    act_space = {k: v for k, v in make_act().items() if k != 'reset'}
   else:
     env = make_env(config, 0)
     notlog = lambda k: not k.startswith('log/')
@@ -299,6 +308,7 @@ def make_env(config, index, **overrides):
   if suite == 'memmaze':
     from embodied.envs import from_gym
     import memory_maze  # noqa
+  is_ag = (suite, task) == ('legmm', 'ag')
   ctor = {
       'dummy': 'embodied.envs.dummy:Dummy',
       'gym': 'embodied.envs.from_gym:FromGym',
@@ -320,6 +330,8 @@ def make_env(config, index, **overrides):
       'memmaze': lambda task, **kw: from_gym.FromGym(
           f'MemoryMaze-{task}-v0', **kw),
   }[suite]
+  if is_ag:
+    ctor = 'embodied.envs.legmm.ag_env:LegMMAgEnv'
   if isinstance(ctor, str):
     module, cls = ctor.split(':')
     module = importlib.import_module(module)
@@ -330,7 +342,11 @@ def make_env(config, index, **overrides):
       'legmm': 'legmm',
   }
   env_key = env_key_alias.get(suite, suite)
+  if is_ag:
+    env_key = 'legmm_ag'
   kwargs = dict(config.env.get(env_key, {}))
+  if is_ag:
+    kwargs['horizon'] = int(config.agent.horizon)   # shaping gamma = 1 - 1/horizon, one source of truth
   kwargs.update(overrides)
   kwargs['logdir'] = config.logdir
   if suite in ('drone', 'dronenav'):
