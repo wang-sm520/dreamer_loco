@@ -1,0 +1,251 @@
+--- a/legmm_skill/tabletop/learning_episode.py
++++ b/legmm_skill/tabletop/learning_episode.py
+@@ -11,6 +11,11 @@
+ 
+ 
+ def run_episode(args,app,learning):
++    from .segment_timing import SegmentTimings
++    timings=SegmentTimings(enabled=bool(getattr(args,'audit_timing',False)))
++    _timing_cohort=timings.begin('cohort_wall_including_setup_cleanup')
++    learning.segment_timings=timings
++    if hasattr(learning,'visual'):learning.visual.segment_timings=timings
+     from .lifecycle_cleanup import check_stop,stop_requested,clear_planner_cache,trim_unused
+     from .assets import build_robot
+     from .geometry import GeometryPlanner,sample_reachable
+@@ -131,6 +136,7 @@
+         trajectory_peak=np.zeros(n);min_height=np.full(n,np.inf);min_upz=np.full(n,np.inf)
+         def step(command,measure=False):
+             nonlocal tick,last,peak_torque,feet_peak,finger_peak,safety_stop
++            _timing_control=timings.begin('standing_and_targets')
+             d=robot.data
+             if tick%2==0:
+                 feet=torch.stack([phase,(phase+.5)%1,(phase+.5)%1,phase],1)
+@@ -146,7 +152,11 @@
+             gravity=robot.root_physx_view.get_gravity_compensation_forces()[:,6+torch.tensor(arm_ids,device=device)]
+             if args.audit_no_gravity_compensation:gravity=torch.zeros_like(gravity)
+             robot.set_joint_effort_target(gravity,joint_ids=arm_ids)
++            timings.end('standing_and_targets',_timing_control)
++            _timing_physics=timings.begin('physics_step')
+             scene.write_data_to_sim();simulation.step(render=False);scene.update(PHYSICS_DT);tick+=1
++            timings.end('physics_step',_timing_physics)
++            _timing_contacts=timings.begin('contact_outcome_readback')
+             peak_torque=torch.maximum(peak_torque,robot.data.applied_torque[:,arm_ids].abs().amax(0))
+             if not torch.isfinite(robot.data.joint_pos).all(): raise FloatingPointError('Nonfinite robot joints')
+             if measure:
+@@ -175,7 +185,7 @@
+                                 # at the foot's sphere are legal, not arbitrary calf hits.
+                                 bid=robot.find_bodies(body)[0][0]
+                                 foot=robot.data.body_pos_w[i,bid]+maths.quat_apply(robot.data.body_quat_w[i,bid][None],tensor([[0,0,-.275]]))[0]
+-                                if np.linalg.norm(points[i,j]-foot.cpu().numpy()) <= .04:
++                                if timings.call('foot_cpu_readback_distance',lambda:np.linalg.norm(points[i,j]-foot.cpu().numpy())) <= .04:
+                                     feet_peak=max(feet_peak,float(force[i,j]));continue
+                             filters=['table','object','floor']
+                             if body in ARM_BODIES:
+@@ -187,6 +197,7 @@
+                 for i,o in enumerate(outcomes):
+                     bottom=lowest_point(float(position[i,2]),rotations[i],states[i].shape,states[i].size)
+                     o.update(bottom,float(target.data.root_lin_vel_w[i,2]),touch[i],bad[i],bool(heights[i]<.2 or upz[i]<=.5))
++            timings.end('contact_outcome_readback',_timing_contacts)
+         # W2 controller acts from the very first physical step. Root writes above
+         # occur only at episode reset; no body/leg/controller resets inside grasp.
+         for _ in range(300): step(native)
+@@ -281,25 +292,32 @@
+                 requested_safe_stop=True;break
+             if args.closed_loop_teacher:
+                 if frame%16==0:
++                    _timing_state=timings.begin('teacher_global_readback')
+                     base=torch.cat((robot.data.root_link_pos_w-origins,robot.data.root_link_quat_w),1).cpu().numpy()
+                     objects=torch.cat((target.data.root_pos_w-origins,target.data.root_quat_w),1).cpu().numpy()
+                     joints=robot.data.joint_pos.cpu().numpy()
+                     velocities=robot.data.root_vel_w.cpu().numpy()
++                    timings.end('teacher_global_readback',_timing_state)
+                     live_labels=[]
+                     for i,teacher in enumerate(teachers):
++                        _timing_label=timings.begin('teacher_label_and_readback')
+                         touches=tuple(float(scene['contact_'+b].data.force_matrix_w[i,0,1].norm())>1. for b in ('left','right'))
+                         measured=MeasuredState(base[i],objects[i],dict(zip(robot.joint_names,joints[i])),
+                             velocities[i,[0,1,5]],last_command[i].cpu().numpy(),queue[:,i].cpu().numpy(),touches,
+                             frame*PHYSICS_DT,any(outcomes[i].reason and outcomes[i].reason.startswith(x) for x in ('collision','fall','drop')))
+                         label,metadata=teacher.label(measured)
++                        timings.end('teacher_label_and_readback',_timing_label)
+                         live_labels.append(label)
+                         schedules[i].extend([dict(phase=metadata['phase'],command_time_s=frame*PHYSICS_DT)]*4)
++                        _timing_io=timings.begin('label_io')
+                         label_log.write(json.dumps(dict(seed=states[i].seed,frame=frame,measured_object_pose=objects[i].tolist(),
+-                            measured_arm=joints[i,arm_ids].tolist(),label=label.tolist(),metadata=metadata))+'\n')
++                            measured_arm=joints[i,arm_ids].tolist(),label=label.tolist(),metadata=metadata,**(dict(actual_previous_command=measured.last_command.tolist(),queue_tick_next=tick) if timings.enabled and i<4 else {})))+'\n')
++                        timings.end('label_io',_timing_io)
+                     label_log.flush()
+                     from .visual import sync_camera_mounts
+                     # Refresh derived kinematic buffers without integrating, then
+                     # synchronize GPU before taking the independent state snapshot.
++                    _timing_render=timings.begin('camera_render_and_guard')
+                     observation_engine_before=engine_steps.copy()
+                     observation_time_before=float(simulation.current_time)
+                     observation_step_before=int(simulation.current_time_step_index)
+@@ -338,6 +356,7 @@
+                             row['max_render_position_error_m']=float(np.linalg.norm(np.asarray(row['after_render_world'])-np.asarray(row['requested_world']),axis=1).max())
+                         with (args.out/'camera_mount_sync.jsonl').open('a') as mount_log:mount_log.write(json.dumps(dict(frame=frame,render_clock_unchanged=render_clock_unchanged,render_state_unchanged=render_state_unchanged,render_time_s=render_time_before,render_step=render_step_before,readbacks=mount_readbacks))+'\n')
+                         if any(row['max_render_position_error_m']>1e-4 for row in mount_readbacks):raise RuntimeError('Rendered camera pose differs from physical mount')
++                    timings.end('camera_render_and_guard',_timing_render)
+                     live_labels=learning.decision(scene,robot,joints,arm_ids,finger_ids,last_command,
+                         np.asarray(live_labels),outcomes,frame,phases=[teacher.phase for teacher in teachers])
+                     for i,teacher in enumerate(teachers):
+@@ -409,6 +428,8 @@
+         if 'simulation' in locals():cleanup['ready_observer_released']=release_ready_observer(simulation)
+         cleanup['planner_cache_entries']=clear_planner_cache(planner)
+         (args.out/'cohort_cleanup.json').write_text(json.dumps(cleanup,indent=2))
++        timings.end('cohort_wall_including_setup_cleanup',_timing_cohort)
++        timings.write(args.out/'segment_timings.json')
+         # Unsubscribe IsaacLab's stop callback before stopping the timeline:
+         # otherwise standalone mode intentionally renders forever on STOP.
+         sim.SimulationContext.clear_instance()
+--- a/legmm_skill/tabletop/learning.py
++++ b/legmm_skill/tabletop/learning.py
+@@ -6,6 +6,7 @@
+ from .student import Student
+ from .data import Reservoir
+ from .visual import DualDepth
++from .segment_timing import timer_for
+ 
+ 
+ class DaggerSession:
+@@ -33,7 +34,8 @@
+             self.visual_diagnostics=VisualDiagnostics(out,states)
+ 
+     def decision(self,scene,robot,joints,arm_ids,finger_ids,last_command,labels,outcomes,frame,phases=None):
+-        images,rgb,wrist=self.visual.observe(scene)
++        timings=timer_for(self)
++        images,rgb,wrist=timings.call('visual_observe_total',self.visual.observe,scene)
+         if self.diagnostic:self.visual_diagnostics.record(scene,images,rgb,wrist,phases,frame)
+         proprio=np.column_stack((joints[:,arm_ids],joints[:,finger_ids[0]]-joints[:,finger_ids[1]]))
+         # CPU reservoir stores only rounded dual depth, native proprio and labels.
+@@ -48,10 +50,13 @@
+                 dict(shape=state.shape,outcome='pending',round=self.round,seed=state.seed,
+                      episode=self.episode_serial,frame=frame))
+             self.collected_samples+=1;self.episode_counts[state.seed]+=1
++        _timing_forward=timings.begin('student_forward')
+         if self.teacher_drives:
+             if self.shadow_student:self.student.act(images,proprio,last_command)
+             actions=labels
+         else:actions=self.student.act(images,proprio,last_command).cpu().numpy()
++        timings.end('student_forward',_timing_forward)
++        _timing_io=timings.begin('decision_io')
+         # At least one real backward/update is part of a capacity short test.
+         record=dict(frame=frame,actual_envs=len(proprio),images_shape=list(images.shape),
+             head_rgb_shape=list(rgb.shape),wrist_depth_shape=list(wrist.shape),
+@@ -62,6 +67,7 @@
+             from PIL import Image
+             Image.fromarray(rgb[0].cpu().numpy()).save(self.out/'head_preview.png')
+             Image.fromarray((images[0,1,0].cpu().numpy()*255).astype(np.uint8)).save(self.out/'wrist_preview.png')
++        timings.end('decision_io',_timing_io)
+         return actions
+ 
+     def finish(self,outcomes,interrupted=False):
+@@ -94,10 +100,11 @@
+         self.started=time.monotonic();self.decisions=0
+ 
+     def decision(self,scene,robot,joints,arm_ids,finger_ids,last_command,labels,outcomes,frame,phases=None):
+-        images,_,_=self.visual.observe(scene)
++        timings=timer_for(self)
++        images,_,_=timings.call('visual_observe_total',self.visual.observe,scene)
+         proprio=np.column_stack((joints[:,arm_ids],joints[:,finger_ids[0]]-joints[:,finger_ids[1]]))
+         self.decisions+=len(proprio)
+-        return self.student.act(images,proprio,last_command).cpu().numpy()
++        return timings.call('student_forward',lambda:self.student.act(images,proprio,last_command).cpu().numpy())
+ 
+     def finish(self,outcomes):
+         (self.out/'student_evaluation.json').write_text(json.dumps(dict(env_decisions=self.decisions,
+--- a/legmm_skill/tabletop/visual.py
++++ b/legmm_skill/tabletop/visual.py
+@@ -9,6 +9,7 @@
+ from airbot_depth.depth import DepthAnythingTransform,DEFAULT_DEPTH_CONFIG
+ from airbot_rl.policy import head_depth
+ from airbot_rl.depth import encode_wrist_depth
++from .segment_timing import timer_for
+ 
+ # A2 base-local head mount is a task design choice, not calibrated hardware.
+ # Wrist mount/intrinsics and both render sizes match the existing source.
+@@ -95,7 +96,8 @@
+         rgb=scene['head_cam'].data.output['rgb'][...,:3]
+         rgb=head_image(rgb,torch.ones(len(rgb),device=rgb.device))
+         wrist=wrist_depth(scene['wrist_cam'].data.output['distance_to_image_plane'])
+-        images=torch.stack((head_depth(self.depth,rgb,batch=8).to(self.device),encode_wrist_depth(wrist)),1)
++        timings=timer_for(self)
++        images=torch.stack((timings.call('da2_head',head_depth,self.depth,rgb,batch=8).to(self.device),timings.call('wrist_preprocess',encode_wrist_depth,wrist)),1)
+         if not torch.isfinite(images).all():raise FloatingPointError('Nonfinite dual-depth observation')
+         return images,rgb,wrist
+ 
+--- a/legmm_skill/tabletop/train_dagger.py
++++ b/legmm_skill/tabletop/train_dagger.py
+@@ -14,7 +14,7 @@
+         audit_scene_solver_4_0=False,audit_scene_solver_unclamped=False)
+ 
+ 
+-def evaluate_fixed(session,app,out,qualification,record_root):
++def evaluate_fixed(session,app,out,qualification,record_root,audit_timing=False):
+     """Use exactly the teacher's fixed static initial states; never train on them."""
+     from .learning import EvaluationSession
+     from .learning_episode import run_episode
+@@ -28,6 +28,7 @@
+         parent=Path(source).parent;data=json.loads(Path(source).read_text())
+         seed=data['seed'];batch=out/f'seed_{seed}';batch.mkdir(exist_ok=False)
+         args=episode_args(batch,len(data['states']),seed)
++        args.audit_timing=audit_timing
+         args.residual_velocity=False
+         args.sampling=Path(json.loads((parent/'sampling_source.json').read_text())['path'])
+         result=run_episode(args,app,evaluation)
+@@ -55,6 +56,7 @@
+     p.add_argument('--resume-state',type=Path);p.add_argument('--recovery-root',type=Path)
+     p.add_argument('--allow-partial-recovery',action='store_true')
+     p.add_argument('--resume-sha256')
++    p.add_argument('--audit-timing',action='store_true')
+     p.add_argument('--capacity-decisions-per-env',type=int,default=2);p.add_argument('--capacity-teacher-control',action='store_true')
+     from isaaclab.app import AppLauncher
+     AppLauncher.add_app_launcher_args(p);a=p.parse_args();a.headless=True;a.enable_cameras=True
+@@ -129,7 +131,7 @@
+             physics='scene_all_actors_4_0',round=number-1,env_decisions=session.seen),guard=guard)
+         status.update(checkpoint=str(checkpoint),phase='student_fixed_validation');save()
+         validation=a.out/f'validation_round_{number:02d}';validation.mkdir(exist_ok=False)
+-        summary=evaluate_fixed(session,app,validation,a.qualification,a.record_root)
++        summary=evaluate_fixed(session,app,validation,a.qualification,a.record_root,audit_timing=a.audit_timing)
+         record=next(row for row in status['rounds'] if row['round']==number-1)
+         record.update(validation_success=summary['success_count'],student_gate_passed=summary['student_gate_passed'])
+         if summary['success_count']>status.get('best_validation_success',-1):
+@@ -156,6 +158,7 @@
+                 out=a.out/f'round_{round_index:02d}_episode_{episode:04d}';out.mkdir(exist_ok=False)
+                 status.update(phase='capacity_pipeline' if a.capacity_only else 'dagger_teacher_collection' if session.teacher_drives else 'dagger_student_collection',current_episode=str(out));save()
+                 args=episode_args(out,a.num_envs,seed)
++                args.audit_timing=a.audit_timing
+                 if a.sampling:args.sampling=a.sampling
+                 if a.replay_sampling_dir:
+                     sample=a.replay_sampling_dir/f'sampling_{seed}.json'
+--- a/legmm_skill/tabletop/learning_launch.py
++++ b/legmm_skill/tabletop/learning_launch.py
+@@ -15,6 +15,7 @@
+     p.add_argument('--resume-student',type=Path);p.add_argument('--skip-teacher-first',action='store_true')
+     p.add_argument('--resume-state',type=Path);p.add_argument('--recovery-root',type=Path);p.add_argument('--allow-partial-recovery',action='store_true')
+     p.add_argument('--resume-sha256')
++    p.add_argument('--audit-timing',action='store_true')
+     p.add_argument('--capacity-decisions-per-env',type=int,default=2);p.add_argument('--capacity-teacher-control',action='store_true');a=p.parse_args()
+     capacity=None;training=None
+     if Path(a.name).name!=a.name:raise ValueError('New simple attempt name required')
+@@ -33,7 +34,9 @@
+         for name in ['student.py','visual.py','learning.py','learning_episode.py',
+                      'isaac_scene.py','geometry.py','closed_loop.py','audit_all_rigid.py','learning_geometry.py','lifecycle_cleanup.py']:
+             current=hashlib.sha256((WORKTREE/'legmm_skill/tabletop'/name).read_bytes()).hexdigest()
+-            if inventory.get(name)!=current:raise ValueError('Visual capacity source changed: '+name)
++            if inventory.get(name)!=current:
++                from .segment_timing import observer_source_compatible
++                if not observer_source_compatible(name,inventory.get(name),current,a.record_root):raise ValueError('Visual capacity source changed: '+name)
+     lock=(OUTPUT/'.isaac_job.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+     guard=StorageGuard(OUTPUT,WORKTREE/'legmm_skill/tabletop');guard.check()
+     card=gpu_snapshot(a.gpu)
+@@ -69,6 +72,7 @@
+     command.extend(['--capacity-cohorts',str(a.capacity_cohorts)])
+     command.extend(['--capacity-decisions-per-env',str(a.capacity_decisions_per_env)])
+     if a.capacity_teacher_control:command.append('--capacity-teacher-control')
++    if a.audit_timing:command.append('--audit-timing')
+     if a.resume_state:command.extend(['--resume-state',str(a.resume_state)])
+     if a.resume_sha256:command.extend(['--resume-sha256',a.resume_sha256])
+     if a.recovery_root:command.extend(['--recovery-root',str(a.recovery_root)])

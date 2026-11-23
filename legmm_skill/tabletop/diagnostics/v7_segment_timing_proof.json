@@ -1,0 +1,31 @@
+{
+  "applied": false,
+  "enabled_by_default": false,
+  "active_process_untouched": true,
+  "qualified_physics_step_AST_unchanged_after_timing_removal": true,
+  "helper_sha256": "27fa0746e796b6e521d0d84a417158826dff09405bbec2b67654265a48221038",
+  "functional_observation_and_policy_AST_unchanged": true,
+  "exact_previous_command_metadata_env_limit": 4,
+  "files": {
+    "learning_episode.py": {
+      "before_sha256": "3f376c7a97ac4184df8d4eddc1e51232625637f5b4e7c2e092a71dcf704e4b4c",
+      "prepared_sha256": "cc8354bc849610a6ee1c47984e330b6af3142a25e9f54c1cd47b2745fbcd3350"
+    },
+    "learning.py": {
+      "before_sha256": "06323f4347eca4e0c88f12add3dbbdd591f2cfbb263dbe00ec06f733b44fb744",
+      "prepared_sha256": "8cf8f55e6b7b2e098506103f1a8afa924fc64401c2458faf5e102416acb466ac"
+    },
+    "visual.py": {
+      "before_sha256": "e531ff0c4f4f6a6fda18ab31cd740a9c326e3417019f71dc80058e621753e3bb",
+      "prepared_sha256": "6db372adbeec484a037f21af57abe746ba036cdc0d86119807c2a77e85f25d1b"
+    },
+    "train_dagger.py": {
+      "before_sha256": "14577a317d22fd7a6fad1e264d6050b81a1736193a234a45d1f9f668303db84e",
+      "prepared_sha256": "acf9e81e14db775d83f81ffa2031842eb75e2cc5d426197a4e6e9bc8996ecc6d"
+    },
+    "learning_launch.py": {
+      "before_sha256": "715fdadd2199197a8cde41b533052c7b3bea2ff2a3257919760d6ca1685dc3aa",
+      "prepared_sha256": "ecc42fd11be4c82445ef7afc9b97a94d2c6e6c6fdb10cae86e9885e9bdbb9beb"
+    }
+  }
+}
