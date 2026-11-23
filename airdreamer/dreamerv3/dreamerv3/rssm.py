@@ -30,6 +30,7 @@ class RSSM(nj.Module):
   absolute: bool = False
   blocks: int = 8
   free_nats: float = 1.0
+  markov_only: bool = False
 
   def __init__(self, act_space, **kw):
     assert self.deter % self.blocks == 0
@@ -65,19 +66,30 @@ class RSSM(nj.Module):
           carry, tokens, action, reset, training)
       return carry, entry, feat
     else:
-      unroll = jax.tree.leaves(tokens)[0].shape[1] if self.unroll else 1
-      carry, (entries, feat) = nj.scan(
-          lambda carry, inputs: self._observe(
-              carry, *inputs, training),
-          carry, (tokens, action, reset), unroll=unroll, axis=1)
+      carry, (entries, feat) = self._observe_sequence(
+          carry, tokens, action, reset, training)
       return carry, entries, feat
 
-  def _observe(self, carry, tokens, action, reset, training):
-    deter, stoch, action = nn.mask(
-        (carry['deter'], carry['stoch'], action), ~reset)
+  def _observe_sequence(
+      self, carry, tokens, action, reset, training, with_prior=False):
+    unroll = jax.tree.leaves(tokens)[0].shape[1] if self.unroll else 1
+    return nj.scan(
+        lambda carry, inputs: self._observe(
+            carry, *inputs, training, with_prior),
+        carry, (tokens, action, reset), unroll=unroll, axis=1)
+
+  def _observe(self, carry, tokens, action, reset, training, with_prior=False):
+    if self.markov_only:
+      deter = jnp.zeros_like(carry['deter'])
+      stoch, action = nn.mask((carry['stoch'], action), ~reset)
+    else:
+      deter, stoch, action = nn.mask(
+          (carry['deter'], carry['stoch'], action), ~reset)
     action = nn.DictConcat(self.act_space, 1)(action)
     action = nn.mask(action, ~reset)
-    deter = self._core(deter, stoch, action)
+    prior_deter = self._core(deter, stoch, action)
+    if not self.markov_only:
+      deter = prior_deter
     tokens = tokens.reshape((*deter.shape[:-1], -1))
     x = tokens if self.absolute else jnp.concatenate([deter, tokens], -1)
     for i in range(self.obslayers):
@@ -89,15 +101,21 @@ class RSSM(nj.Module):
     feat = dict(deter=deter, stoch=stoch, logit=logit)
     entry = dict(deter=deter, stoch=stoch)
     assert all(x.dtype == nn.COMPUTE_DTYPE for x in (deter, stoch, logit))
+    if with_prior:
+      return carry, (entry, feat, prior_deter)
     return carry, (entry, feat)
 
   def imagine(self, carry, policy, length, training, single=False):
     if single:
+      if self.markov_only:
+        carry = dict(carry, deter=jnp.zeros_like(carry['deter']))
       action = policy(sg(carry)) if callable(policy) else policy
       actemb = nn.DictConcat(self.act_space, 1)(action)
       deter = self._core(carry['deter'], carry['stoch'], actemb)
       logit = self._prior(deter)
       stoch = nn.cast(self._dist(logit).sample(seed=nj.seed()))
+      if self.markov_only:
+        deter = carry['deter']
       carry = nn.cast(dict(deter=deter, stoch=stoch))
       feat = nn.cast(dict(deter=deter, stoch=stoch, logit=logit))
       assert all(x.dtype == nn.COMPUTE_DTYPE for x in (deter, stoch, logit))
@@ -119,11 +137,21 @@ class RSSM(nj.Module):
 
   def loss(self, carry, tokens, acts, reset, training):
     metrics = {}
-    carry, entries, feat = self.observe(carry, tokens, acts, reset, training)
-    prior = self._prior(feat['deter'])
+    if self.markov_only:
+      # Train the one-step transition without exposing it to the posterior
+      # or downstream heads.
+      carry, tokens, acts = nn.cast((carry, tokens, acts))
+      carry, (entries, feat, prior_deter) = self._observe_sequence(
+          carry, tokens, acts, reset, training, with_prior=True)
+    else:
+      carry, entries, feat = self.observe(carry, tokens, acts, reset, training)
+      prior_deter = feat['deter']
+    prior = self._prior(prior_deter)
     post = feat['logit']
     dyn = self._dist(sg(post)).kl(self._dist(prior))
-    rep = self._dist(post).kl(self._dist(sg(prior)))
+    # In the Markov ablation both KL terms supervise the transition.
+    rep_prior = prior if self.markov_only else sg(prior)
+    rep = self._dist(post).kl(self._dist(rep_prior))
     if self.free_nats:
       dyn = jnp.maximum(dyn, self.free_nats)
       rep = jnp.maximum(rep, self.free_nats)
