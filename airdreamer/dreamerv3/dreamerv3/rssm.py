@@ -149,9 +149,7 @@ class RSSM(nj.Module):
     prior = self._prior(prior_deter)
     post = feat['logit']
     dyn = self._dist(sg(post)).kl(self._dist(prior))
-    # In the Markov ablation both KL terms supervise the transition.
-    rep_prior = prior if self.markov_only else sg(prior)
-    rep = self._dist(post).kl(self._dist(rep_prior))
+    rep = self._dist(post).kl(self._dist(sg(prior)))
     if self.free_nats:
       dyn = jnp.maximum(dyn, self.free_nats)
       rep = jnp.maximum(rep, self.free_nats)

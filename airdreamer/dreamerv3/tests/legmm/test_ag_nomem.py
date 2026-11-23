@@ -209,7 +209,7 @@ def test_transition_kl_and_action_responsive_imagination(tmp_path):
     dyn_norm, rep_norm = norm(dyn_grad, prefix), norm(rep_grad, prefix)
     print(f'{prefix}: dyn_grad_norm={dyn_norm}, rep_grad_norm={rep_norm}')
     assert dyn_norm > 0.0 and math.isfinite(dyn_norm)
-    assert rep_norm > 0.0 and math.isfinite(rep_norm)
+    assert rep_norm == 0.0
   rep_norm = norm(rep_grad, 'dyn/obslogit/')
   print(f'dyn/obslogit/: rep_grad_norm={rep_norm}')
   assert rep_norm > 0.0 and math.isfinite(rep_norm)
